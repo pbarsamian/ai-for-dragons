@@ -1084,6 +1084,25 @@ TOOL_REGISTRY: dict[str, dict] = {
         },
         "fn": _exercise_get,
     },
+
+    # Self-update (2)
+    "update_status": {
+        "description": "Check whether AI for Dragons is up to date. Fetches the latest commit from GitHub and reports what has changed since the installed version. Call this when the user asks 'are there updates?' or 'what version am I running?'.",
+        "schema": {"type": "object", "properties": {}, "required": []},
+        "fn": _update_status,
+    },
+    "self_update": {
+        "description": "Pull the latest AI for Dragons code from GitHub, reinstall it into the running venv, run a smoke test, and restart the agent. Call this when the user asks to update, upgrade, or install the latest version.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "branch":  {"type": "string",  "description": "Git branch to pull from (default: main)"},
+                "restart": {"type": "boolean", "description": "Restart the agent after updating (default: true)"},
+            },
+            "required": [],
+        },
+        "fn": _self_update,
+    },
 }
 
 

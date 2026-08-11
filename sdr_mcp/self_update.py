@@ -26,9 +26,8 @@ def _find_source_dir() -> str | None:
     """Find the AI for Dragons source directory."""
     candidates = [
         # Standard install location from the installer
-        os.path.expanduser("~/sdr-mcp-pi5-bundle/sdr-mcp"),
+        os.path.expanduser("~/ai-for-dragons-pi5-bundle/ai-for-dragons"),
         os.path.expanduser("~/ai-for-dragons"),
-        os.path.expanduser("~/sdr-mcp"),
         # Relative to this file if running from source
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     ]
@@ -41,7 +40,7 @@ def _find_source_dir() -> str | None:
 
 def _venv_site_packages() -> str | None:
     """Find the venv site-packages directory."""
-    venv = os.path.expanduser("~/.local/share/sdr-mcp")
+    venv = os.path.expanduser("~/.local/share/ai-for-dragons")
     py_tag = f"python{sys.version_info.major}.{sys.version_info.minor}"
     site = os.path.join(venv, "lib", py_tag, "site-packages")
     return site if os.path.isdir(site) else None
@@ -253,8 +252,8 @@ def self_update(branch: str = "main", restart: bool = True) -> str:
         sys.stdout.flush()
 
         # Replace current process with a fresh agent
-        agent_path = shutil.which("sdr-agent") or os.path.join(
-            os.path.expanduser("~/.local/bin"), "sdr-agent"
+        agent_path = shutil.which("dragon-agent") or os.path.join(
+            os.path.expanduser("~/.local/bin"), "dragon-agent"
         )
         if agent_path and os.path.isfile(agent_path):
             os.execv(agent_path, [agent_path])
