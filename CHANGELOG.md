@@ -4,6 +4,11 @@ All notable changes to ai-for-dragons are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- `hackrf_sweep` / `_check_hackrf_free()` hang when HackRF USB device is in kernel D-state — replaced `subprocess.run(timeout=)` with a bounded `Popen` pattern so both `communicate()` calls have explicit timeouts; the hang occurred because `subprocess.run` drains pipes without a timeout after its internal kill, blocking forever if the device is uninterruptible
+
 ## [0.3.0] — 2025
 
 ### Added
