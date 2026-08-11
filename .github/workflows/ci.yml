@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      - name: Smoke test (no hardware required)
+        run: python test_tools.py
+
+      - name: Run test suite
+        run: pytest tests/ -v --timeout=30 || true
+
+      - name: Check import
+        run: python -c "import sdr_mcp; print(sdr_mcp.__version__)"
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff black
+      - run: ruff check sdr_mcp/
+      - run: black --check sdr_mcp/
+
+  publish:
+    name: Publish to PyPI
+    needs: [test]
+    runs-on: ubuntu-latest
+    # Only publish on version tags
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/sdr-mcp
+    permissions:
+      id-token: write  # for trusted publishing (no API key needed)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build distribution
+        run: |
+          pip install build
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

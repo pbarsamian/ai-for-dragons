@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-for-dragons"
+version = "0.3.0"
+description = "AI-powered SDR tool bridge for DragonOS + HackRF One via Model Context Protocol"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+keywords = ["sdr", "hackrf", "mcp", "dragonos", "radio", "claude", "ollama"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Ham Radio",
+    "Topic :: Scientific/Engineering",
+]
+
+# Core has no required dependencies — uses stdlib + system tools
+dependencies = []
+
+[project.optional-dependencies]
+# For IQ file analysis
+analysis = ["numpy>=1.24"]
+# For local Ollama agent
+ollama   = ["ollama>=0.1", "httpx>=0.24"]
+# For development
+dev      = [
+    "pytest>=7.0",
+    "pytest-timeout",
+    "black",
+    "ruff",
+    "mypy",
+]
+# Everything
+all = ["ai-for-dragons[analysis,ollama]"]
+
+[project.scripts]
+ai-for-dragons   = "sdr_mcp.server:run"
+dragon-agent = "ollama_agent:main"
+
+[project.urls]
+Homepage      = "https://github.com/pbarsamian/ai-for-dragons"
+Repository    = "https://github.com/pbarsamian/ai-for-dragons"
+Issues        = "https://github.com/pbarsamian/ai-for-dragons/issues"
+Changelog     = "https://github.com/pbarsamian/ai-for-dragons/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where   = ["."]
+include = ["sdr_mcp*"]
+
+[tool.setuptools.package-data]
+sdr_mcp = ["py.typed"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+timeout = 30
+testpaths = ["tests"]
