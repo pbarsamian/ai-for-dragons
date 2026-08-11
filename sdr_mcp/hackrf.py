@@ -34,16 +34,35 @@ def _check_hackrf_free() -> str | None:
     """
     Check whether the HackRF is accessible.
     Returns None if free, or an error string if not.
-    Uses only hackrf_info — confirmed to exit cleanly and quickly on DragonOS.
+    Uses Popen (not subprocess.run) so we can bound both communicate() calls.
+    subprocess.run drains pipes without a timeout after its kill, which can hang
+    indefinitely if the USB device is stuck in kernel D-state.
     """
     try:
-        r = subprocess.run(
+        proc = subprocess.Popen(
             ["hackrf_info"],
-            capture_output=True, text=True, timeout=6
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
-        if r.returncode == 0:
+        stdout, stderr = "", ""
+        try:
+            stdout, stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                stdout, stderr = proc.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass  # D-state — abandon, return timeout error below
+            return (
+                "HackRF timed out during check — likely held by GQRX or another app.\n"
+                "Click the GQRX stop button (■) to release the hardware, then retry."
+            )
+
+        rc = proc.returncode if proc.returncode is not None else -1
+        if rc == 0:
             return None  # free and responding
-        combined = (r.stderr + r.stdout).lower()
+        combined = (stderr + stdout).lower()
         if any(kw in combined for kw in ("busy", "in use", "claimed", "resource")):
             return (
                 "HackRF is held by another application (likely GQRX).\n"
@@ -52,15 +71,10 @@ def _check_hackrf_free() -> str | None:
         if any(kw in combined for kw in ("not found", "no hackrf", "unable")):
             return (
                 "HackRF not detected — check it is plugged into a blue USB 3.0 port.\n"
-                f"Detail: {r.stderr.strip() or r.stdout.strip()}"
+                f"Detail: {stderr.strip() or stdout.strip()}"
             )
         # Unknown non-zero exit — don't block, let the actual command report the error
         return None
-    except subprocess.TimeoutExpired:
-        return (
-            "HackRF timed out during check — likely held by GQRX or another app.\n"
-            "Click the GQRX stop button (■) to release the hardware, then retry."
-        )
     except FileNotFoundError:
         return "hackrf_info not found — try: sudo apt install hackrf"
 
@@ -106,11 +120,15 @@ def hackrf_sweep(
             stderr=subprocess.PIPE,
             text=True,
         )
+        stdout, stderr = "", ""
         try:
             stdout, stderr = proc.communicate(timeout=SWEEP_DURATION)
         except subprocess.TimeoutExpired:
             proc.kill()
-            stdout, stderr = proc.communicate()
+            try:
+                stdout, stderr = proc.communicate(timeout=3)
+            except subprocess.TimeoutExpired:
+                pass  # D-state — use whatever we have (empty strings)
 
         out = stdout
         err = stderr
