@@ -147,10 +147,11 @@ def hackrf_sweep(
         return f"hackrf_sweep failed:\n{err}"
 
     # Parse CSV output → find top signals
+    # Split on comma and strip each field to handle both "a, b" and "a,b" formats
     peaks = []
     for line in out.splitlines():
-        parts = line.strip().split(", ")
-        if len(parts) < 6:
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 7:  # date, time, hz_low, hz_high, step, n_samples, 1+ dBm
             continue
         try:
             hz_low   = float(parts[2])
