@@ -8,11 +8,12 @@ cd "$SCRIPT_DIR"
 echo "[update] Pulling latest from GitHub..."
 git pull
 
-PY_TAG=$(python3 -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')")
-SITE="$HOME/.local/share/ai-for-dragons/lib/$PY_TAG/site-packages"
+# Find site-packages by asking Python where sdr_mcp is already installed
+SITE=$(python3 -c "import sdr_mcp, os; print(os.path.dirname(os.path.dirname(sdr_mcp.__file__)))" 2>/dev/null)
 
-if [ ! -d "$SITE" ]; then
-    echo "[update] ERROR: venv site-packages not found at $SITE"
+if [ -z "$SITE" ] || [ ! -d "$SITE" ]; then
+    echo "[update] ERROR: could not locate installed sdr_mcp. Is the venv active or on PATH?"
+    echo "[update] Try: python3 -c \"import sdr_mcp; print(sdr_mcp.__file__)\""
     exit 1
 fi
 
