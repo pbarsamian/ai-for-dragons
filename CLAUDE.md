@@ -101,7 +101,7 @@ pytest tests/               # full suite
 ```
 
 **Pi 5 (DragonOS Pi64):**
-- Source lives in `~/ai-for-dragons-pi5-bundle/ai-for-dragons/`
+- Source lives in `~/sdr-mcp-pi5-bundle/sdr-mcp/`
 - Venv at `~/.local/share/ai-for-dragons/`
 - Commands: `dragon-agent`, `ai-for-dragons` (symlinked to /usr/local/bin)
 - Update: `git pull` then copy source files into venv site-packages

@@ -25,7 +25,9 @@ from datetime import datetime, timezone
 def _find_source_dir() -> str | None:
     """Find the AI for Dragons source directory."""
     candidates = [
-        # Standard install location from the installer
+        # Actual install location on Pi
+        os.path.expanduser("~/sdr-mcp-pi5-bundle/sdr-mcp"),
+        # Future/renamed install locations
         os.path.expanduser("~/ai-for-dragons-pi5-bundle/ai-for-dragons"),
         os.path.expanduser("~/ai-for-dragons"),
         # Relative to this file if running from source
