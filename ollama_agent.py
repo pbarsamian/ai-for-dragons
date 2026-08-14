@@ -34,7 +34,6 @@ CORE_TOOL_NAMES = {
     "hackrf_info", "hackrf_sweep", "hackrf_capture", "hackrf_analyze", "hackrf_replay",
     "gqrx_status", "gqrx_tune", "gqrx_stop", "gqrx_start",
     "signal_identify", "app_status",
-    "exercise_list", "exercise_get",
 }
 
 
@@ -301,7 +300,7 @@ def main() -> None:
     parser.add_argument("--interval", type=int, default=60,
                         help="Watch mode scan interval in seconds (default 60)")
     parser.add_argument("--all-tools", action="store_true",
-                        help="Pass all 73 tools instead of the default core 13 (slower on Pi 5)")
+                        help="Pass all 73 tools instead of the default core 11 (slower on Pi 5)")
     args = parser.parse_args()
 
     if args.watch:

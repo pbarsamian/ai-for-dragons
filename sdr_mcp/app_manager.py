@@ -164,11 +164,12 @@ def gqrx_start() -> str:
     if r.returncode != 0:
         _launch_gui(["gqrx"])
 
-    if _wait_for_port(7356, timeout_sec=20):
+    if _wait_for_port(7356, timeout_sec=6):
         return f"GQRX started{msg_others} — remote control ready on port 7356."
     return (
-        f"GQRX started{msg_others} but port 7356 not open yet. "
-        "In GQRX: Tools → Remote control → Start"
+        f"GQRX started{msg_others}. "
+        "Remote control port 7356 is not active — enable it in GQRX: Tools → Remote control → Start. "
+        "Workflow complete."
     )
 
 
