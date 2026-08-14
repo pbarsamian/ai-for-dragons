@@ -10,8 +10,18 @@ ok()   { echo -e "  ${GREEN}✓${RESET} $*"; }
 warn() { echo -e "  ${YELLOW}⚠${RESET} $*"; }
 hdr()  { echo -e "\n${CYAN}▸ $*${RESET}"; }
 
-VENV="$HOME/.local/share/ai-for-dragons"
-VENV_PY="$VENV/bin/python"
+# Detect venv across renamed install locations
+VENV=""
+for candidate in \
+    "$HOME/.local/share/ai-for-dragons" \
+    "$HOME/.local/share/sdr-mcp" \
+    "$HOME/.local/share/dragon-agent"; do
+    if [ -x "$candidate/bin/python" ]; then
+        VENV="$candidate"
+        break
+    fi
+done
+VENV_PY="${VENV}/bin/python"
 
 echo ""
 echo "══════════════════════════════════════════════════════"

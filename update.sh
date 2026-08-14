@@ -19,8 +19,6 @@ warn()    { echo -e "${YELLOW}⚠${RESET} $*"; }
 error()   { echo -e "${RED}✗${RESET} $*" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV="$HOME/.local/share/ai-for-dragons"
-VENV_PY="$VENV/bin/python"
 
 # ── 1. Pull ────────────────────────────────────────────────────────────────
 
@@ -29,13 +27,49 @@ info "Pulling latest from GitHub..."
 git pull
 success "Up to date: $(git log -1 --format='%h %s')"
 
-# ── 2. Locate venv site-packages ──────────────────────────────────────────
+# ── 2. Locate venv ────────────────────────────────────────────────────────
+# Try known locations in order — the name changed across versions.
 
-if [ ! -x "$VENV_PY" ]; then
-    error "Venv not found at $VENV"
-    error "Run the installer first: bash sdr-mcp-install-pi5.sh"
+VENV=""
+for candidate in \
+    "$HOME/.local/share/ai-for-dragons" \
+    "$HOME/.local/share/sdr-mcp" \
+    "$HOME/.local/share/dragon-agent"; do
+    if [ -x "$candidate/bin/python" ]; then
+        VENV="$candidate"
+        break
+    fi
+done
+
+# Fallback: ask the wrapper script where it points
+if [ -z "$VENV" ]; then
+    for wrapper in dragon-agent sdr-agent ai-for-dragons sdr-mcp; do
+        wrapper_path=$(which "$wrapper" 2>/dev/null || true)
+        if [ -n "$wrapper_path" ]; then
+            # Extract the python path from the exec line
+            py=$(grep -oP '(?<=exec ")[^"]+python[^"]*' "$wrapper_path" 2>/dev/null \
+                 || grep -oP '/\S+/python[0-9.]*' "$wrapper_path" 2>/dev/null | head -1)
+            if [ -n "$py" ] && [ -x "$py" ]; then
+                VENV=$(dirname "$(dirname "$py")")
+                break
+            fi
+        fi
+    done
+fi
+
+VENV_PY="${VENV}/bin/python"
+
+if [ -z "$VENV" ] || [ ! -x "$VENV_PY" ]; then
+    error "Could not find the venv. Checked:"
+    error "  ~/.local/share/ai-for-dragons"
+    error "  ~/.local/share/sdr-mcp"
+    error "  wrapper scripts on PATH"
+    error ""
+    error "Run: ls ~/.local/share/ to see what's there, then tell dragon-agent."
     exit 1
 fi
+
+info "Found venv at: $VENV"
 
 PY_TAG=$("$VENV_PY" -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')")
 SITE="$VENV/lib/$PY_TAG/site-packages"
