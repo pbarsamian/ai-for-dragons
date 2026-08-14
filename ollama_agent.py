@@ -185,7 +185,7 @@ def chat_loop(model: str) -> None:
         sys.exit(1)
     model = resolved  # use exact name Ollama knows
 
-    client  = ollama.Client(timeout=120)
+    client  = ollama.Client(timeout=300)
     tools   = build_ollama_tools()
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
 
@@ -294,7 +294,7 @@ def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int) 
         sys.exit(1)
     model = resolved  # use exact name Ollama knows
 
-    client = ollama.Client(timeout=120)
+    client = ollama.Client(timeout=300)
     tools  = build_ollama_tools()
 
     print(f"[dragon-agent] Watch mode: {freq_min}-{freq_max} MHz every {interval_sec}s")
