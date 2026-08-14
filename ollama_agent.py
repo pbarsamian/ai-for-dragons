@@ -336,8 +336,8 @@ def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int, 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="dragon-agent — Offline SDR AI assistant")
-    parser.add_argument("--model", default="qwen2.5:3b",
-                        help="Ollama model name (default: qwen2.5:3b)")
+    parser.add_argument("--model", default="qwen2.5:7b",
+                        help="Ollama model name (default: qwen2.5:7b)")
     parser.add_argument("--watch", nargs=2, type=float, metavar=("FREQ_MIN", "FREQ_MAX"),
                         help="Watch mode: continuously monitor FREQ_MIN-FREQ_MAX MHz")
     parser.add_argument("--interval", type=int, default=60,
