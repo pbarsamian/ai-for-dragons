@@ -101,6 +101,8 @@ TOOL USE GUIDELINES:
 - Replay attacks should only be done against equipment the user owns.
 
 Be concise, technical, and safety-aware. Mention legal considerations when transmitting.
+
+/no_think
 """
 
 
