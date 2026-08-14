@@ -18,92 +18,24 @@ from sdr_mcp.tools import TOOL_REGISTRY, execute_tool
 
 
 SYSTEM_PROMPT = """\
-You are AI for Dragons — an AI-powered SDR assistant running on a Raspberry Pi 5
-with DragonOS Pi64 and a HackRF One. You have access to 73 tools.
+SDR assistant on Raspberry Pi 5, DragonOS Pi64, HackRF One (1 MHz-6 GHz).
+Be concise. Call tools immediately without explanation. /no_think
 
-HARDWARE:
-- HackRF One: 1 MHz-6 GHz, 20 MSPS, TX+RX capable
-- DragonOS Pi64: full SDR suite pre-installed
-
-GUI APPS AND HARDWARE EXCLUSIVITY:
-  GROUP A — hold HackRF exclusively (only one can run at a time):
-    GQRX         gqrx_stop / gqrx_start         remote control on port 7356
-    SDRAngel      sdrangel_stop / sdrangel_start
-    dump1090      dump1090_stop / dump1090_start  web map on port 8080
-    GNU Radio     gnuradio_stop / gnuradio_open   when a flowgraph is active
-
-  GROUP B — no hardware conflict, runs alongside any SDR app:
-    inspectrum    inspectrum_open/stop        reads IQ files only
-    URH           urh_open/stop               file mode is conflict-free
-    SatDump       satdump_open/stop           gui mode is conflict-free
-    SigDigger     sigdigger_open/stop         file mode is conflict-free
-    Wireshark     wireshark_open/stop         packet analysis, no hardware
-    Kismet        kismet_start/stop           WiFi/BT scanner (web UI :2501)
-    Gpredict      gpredict_start/stop         satellite pass prediction
-    fldigi        fldigi_start/stop           audio only, ham digital modes
-    WSJT-X        wsjtx_start/stop            audio only, FT8/WSPR/JT65
-    QSSTV         qsstv_start/stop            audio only, SSTV image decode
-    multimon-ng   multimon_decode             audio file decoder, pagers/DTMF
-    DSD-FME       dsdfme_decode               audio file decoder, digital voice
-
-  GROUP A — need exclusive HackRF (only one at a time):
-    GQRX          gqrx_stop / gqrx_start             remote control on :7356
-    SDRAngel      sdrangel_stop / sdrangel_start
-    SDR++         sdrpp_stop / sdrpp_start            lighter on ARM64
-    CubicSDR      cubicsdr_stop / cubicsdr_start      multi-channel demod
-    QSpectrumAnalyzer  qspectrumanalyzer_stop / qspectrumanalyzer_start
-    OpenWebRX-plus     openwebrx_stop / openwebrx_start   browser at :8073
-    dump1090      dump1090_stop / dump1090_start      ADS-B, web map :8080
-    rtl_433       rtl433_start                        ISM sensor autodecode
-    GNU Radio     gnuradio_stop / gnuradio_open
-
-  AVIATION & MARITIME (all need exclusive HackRF):
-    dump1090      dump1090_start/stop    ADS-B aircraft 1090 MHz, web map :8080
-    rtlais_start                         AIS marine vessels 162 MHz
-    dumpvdl2_start                       VDL2 aircraft datalink 136 MHz (near airports)
-    dumphfdl_start                       HFDL aircraft datalink on HF shortwave
-    jaero_start/stop                     Inmarsat ACARS (audio-based, no HF conflict)
-
-  PROTOCOL INTERPRETATION (no hardware, pure analysis):
-    interpret_adsb         Decode raw ADS-B hex frames field by field
-    interpret_ais          Decode raw AIS NMEA sentences
-    interpret_acars        Decode ACARS label codes and message content
-    interpret_pocsag       Decode multimon-ng POCSAG pager output
-    interpret_meshtastic   Decode Meshtastic sniffer JSON packets
-    explain_hex            Byte-by-byte breakdown of any hex data
-    identify_frequency     What services/protocols are at a given MHz
-
-  These work on data already decoded by the other tools — use them to
-  explain what the bytes actually mean after capturing or decoding.
-
-  Use app_status to see what is running and what holds the HackRF.
-  OpenWebRX-plus is the best option when SSH'd in and wanting a live waterfall.
-
-TOOL USE GUIDELINES:
-- HARDWARE EXCLUSIVITY: The HackRF can only be used by one app at a time.
-  hackrf_sweep, hackrf_capture, and hackrf_replay require exclusive hardware access.
-  gqrx_tune, gqrx_status, gqrx_record etc require GQRX to be running.
-  NEVER call hackrf_sweep or hackrf_capture while GQRX is running.
-
-- AUTOMATIC STOP/START: You have gqrx_stop and gqrx_start tools to manage this
-  transition automatically. For any workflow that sweeps then tunes, use this sequence:
-    1. gqrx_stop       — releases HackRF from GQRX
-    2. hackrf_sweep    — perform the sweep
-    3. gqrx_start      — restarts GQRX headless, waits for port 7356
-    4. gqrx_tune       — tune to the result
-  Do this automatically without asking the user — it is the expected workflow.
-
-- Before sweeping, tell the user what you are about to do:
-  "I'll stop GQRX, sweep [range], find the strongest signal,
-   then restart GQRX and tune to it." 
-- For Meshtastic, the default US frequency is 906.875 MHz (LongFast preset).
-- IQ captures are saved to ~/sdr-captures/.
-- Replay attacks should only be done against equipment the user owns.
-
-Be concise, technical, and safety-aware. Mention legal considerations when transmitting.
-
-/no_think
+RULES:
+- HackRF is exclusive: only one app at a time. gqrx_stop before hackrf_sweep/capture.
+- Sweep workflow: gqrx_stop → hackrf_sweep → gqrx_start → gqrx_tune. Do this automatically.
+- GQRX tools (gqrx_tune/status/record) require GQRX running. hackrf_* tools do not.
+- Meshtastic default US freq: 906.875 MHz. IQ files go to ~/sdr-captures/.
 """
+
+# Core tools sent by default — keeps input tokens small for fast Pi 5 response.
+# Use --all-tools to pass the full registry.
+CORE_TOOL_NAMES = {
+    "hackrf_info", "hackrf_sweep", "hackrf_capture", "hackrf_analyze", "hackrf_replay",
+    "gqrx_status", "gqrx_tune", "gqrx_stop", "gqrx_start",
+    "signal_identify", "app_status",
+    "exercise_list", "exercise_get",
+}
 
 
 def check_ollama(model: str) -> bool:
@@ -160,9 +92,13 @@ def spinner(stop_event: threading.Event, message: str = "Thinking") -> None:
     print("\r" + " " * (len(message) + 10) + "\r", end="", flush=True)
 
 
-def build_ollama_tools() -> list[dict]:
+def build_ollama_tools(all_tools: bool = False) -> list[dict]:
+    names = TOOL_REGISTRY.keys() if all_tools else CORE_TOOL_NAMES
     tools = []
-    for name, spec in TOOL_REGISTRY.items():
+    for name in names:
+        if name not in TOOL_REGISTRY:
+            continue
+        spec = TOOL_REGISTRY[name]
         tools.append({
             "type": "function",
             "function": {
@@ -174,7 +110,7 @@ def build_ollama_tools() -> list[dict]:
     return tools
 
 
-def chat_loop(model: str) -> None:
+def chat_loop(model: str, all_tools: bool = False) -> None:
     try:
         import ollama
     except ImportError:
@@ -189,11 +125,11 @@ def chat_loop(model: str) -> None:
 
     import httpx
     client  = ollama.Client(timeout=httpx.Timeout(connect=10, read=300, write=30, pool=10))
-    tools   = build_ollama_tools()
+    tools   = build_ollama_tools(all_tools)
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    print(f"\n[dragon-agent] Model: {model}  |  Type 'quit' to exit")
-    print(f"[dragon-agent] {len(TOOL_REGISTRY)} tools available\n")
+    tool_count = len(tools)
+    print(f"\n[dragon-agent] Model: {model}  |  Tools: {tool_count}  |  Type 'quit' to exit\n")
 
     while True:
         try:
@@ -286,7 +222,7 @@ def chat_loop(model: str) -> None:
                 })
 
 
-def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int) -> None:
+def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int, all_tools: bool = False) -> None:
     """Continuous band monitoring with LLM anomaly analysis."""
     try:
         import ollama
@@ -301,7 +237,7 @@ def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int) 
 
     import httpx
     client = ollama.Client(timeout=httpx.Timeout(connect=10, read=300, write=30, pool=10))
-    tools  = build_ollama_tools()
+    tools  = build_ollama_tools(all_tools)
 
     print(f"[dragon-agent] Watch mode: {freq_min}-{freq_max} MHz every {interval_sec}s")
     print("[dragon-agent] Press Ctrl+C to stop\n")
@@ -364,12 +300,14 @@ def main() -> None:
                         help="Watch mode: continuously monitor FREQ_MIN-FREQ_MAX MHz")
     parser.add_argument("--interval", type=int, default=60,
                         help="Watch mode scan interval in seconds (default 60)")
+    parser.add_argument("--all-tools", action="store_true",
+                        help="Pass all 73 tools instead of the default core 13 (slower on Pi 5)")
     args = parser.parse_args()
 
     if args.watch:
-        watch_loop(args.model, args.watch[0], args.watch[1], args.interval)
+        watch_loop(args.model, args.watch[0], args.watch[1], args.interval, args.all_tools)
     else:
-        chat_loop(args.model)
+        chat_loop(args.model, args.all_tools)
 
 
 if __name__ == "__main__":
