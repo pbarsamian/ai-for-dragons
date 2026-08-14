@@ -42,6 +42,7 @@ from .app_manager import (
     app_status,
 )
 from .hackrf  import hackrf_info, hackrf_sweep, hackrf_capture, hackrf_analyze, hackrf_replay
+from .rtlsdr  import rtlsdr_info, rtlsdr_capture, rtlsdr_power
 from .self_update import self_update, update_status
 from .protocol_interpreter import (
     interpret_adsb,
@@ -395,7 +396,7 @@ def _satdump_open(args: dict) -> str:
 def _satdump_stop(args: dict) -> str:    return satdump_stop()
 
 def _dump1090_start(args: dict) -> str:
-    return dump1090_start(int(args.get("duration_sec", 60)))
+    return dump1090_start(int(args.get("duration_sec", 60)), device=args.get("device", "hackrf"))
 
 def _dump1090_stop(args: dict) -> str:   return dump1090_stop()
 
@@ -417,11 +418,11 @@ def _fldigi_stop(args: dict)  -> str:            return fldigi_stop()
 def _jaero_start(args: dict) -> str:    return jaero_start()
 def _jaero_stop(args: dict) -> str:     return jaero_stop()
 def _rtlais_start(args: dict) -> str:
-    return rtlais_start(int(args.get("duration_sec", 60)))
+    return rtlais_start(int(args.get("duration_sec", 60)), device=args.get("device", "hackrf"))
 def _dumphfdl_start(args: dict) -> str:
     return dumphfdl_start(args.get("freq_list", None), int(args.get("duration_sec", 60)))
 def _dumpvdl2_start(args: dict) -> str:
-    return dumpvdl2_start(int(args.get("duration_sec", 60)))
+    return dumpvdl2_start(int(args.get("duration_sec", 60)), device=args.get("device", "hackrf"))
 
 
 def _wireshark_open(args: dict) -> str:  return wireshark_open(args.get("capture_file", ""))
@@ -433,7 +434,32 @@ def _wsjtx_stop(args: dict) -> str:      return wsjtx_stop()
 def _gpredict_start(args: dict) -> str:  return gpredict_start()
 def _gpredict_stop(args: dict) -> str:   return gpredict_stop()
 def _rtl433_start(args: dict) -> str:
-    return rtl433_start(float(args.get("freq_mhz", 433.92)), int(args.get("duration_sec", 30)))
+    return rtl433_start(float(args.get("freq_mhz", 433.92)), int(args.get("duration_sec", 30)), device=args.get("device", "hackrf"))
+
+
+def _rtlsdr_info(args: dict) -> str:
+    return rtlsdr_info(args.get("device_index"))
+
+
+def _rtlsdr_capture(args: dict) -> str:
+    return rtlsdr_capture(
+        freq_mhz=float(args["freq_mhz"]),
+        duration_sec=int(args.get("duration_sec", 10)),
+        device_index=int(args.get("device_index", 0)),
+        sample_rate_msps=float(args.get("sample_rate_msps", 2.048)),
+        output_path=args.get("output_path"),
+    )
+
+
+def _rtlsdr_power(args: dict) -> str:
+    return rtlsdr_power(
+        freq_min_mhz=float(args["freq_min_mhz"]),
+        freq_max_mhz=float(args["freq_max_mhz"]),
+        device_index=int(args.get("device_index", 0)),
+        integration_sec=int(args.get("integration_sec", 10)),
+    )
+
+
 def _multimon_decode(args: dict) -> str:
     return multimon_decode(args.get("audio_file", ""), args.get("modes", []))
 def _qsstv_start(args: dict) -> str:     return qsstv_start()
@@ -613,11 +639,12 @@ TOOL_REGISTRY: dict[str, dict] = {
         "fn": _satdump_stop,
     },
     "dump1090_start": {
-        "description": "Start dump1090 for ADS-B aircraft tracking on 1090 MHz. Stops GQRX first. Opens web map on http://localhost:8080.",
+        "description": "Start dump1090 for ADS-B aircraft tracking on 1090 MHz. Use device='rtlsdr:N' for RTL-SDR (recommended) or 'hackrf' for HackRF. Opens web map on http://localhost:8080.",
         "schema": {
             "type": "object",
             "properties": {
                 "duration_sec": {"type": "integer", "description": "Run duration in seconds (default 60)"},
+                "device": {"type": "string", "description": "SDR device: 'hackrf' (default) or 'rtlsdr:N' for RTL-SDR device index N"},
             },
             "required": [],
         },
@@ -702,11 +729,12 @@ TOOL_REGISTRY: dict[str, dict] = {
         "fn": _jaero_stop,
     },
     "rtlais_start": {
-        "description": "Decode AIS marine vessel transponders on 161.975/162.025 MHz — the maritime equivalent of ADS-B. Returns vessel positions, MMSI, speed, heading. Needs exclusive HackRF access.",
+        "description": "Decode AIS marine vessel transponders on 161.975/162.025 MHz — the maritime equivalent of ADS-B. Returns vessel positions, MMSI, speed, heading. Needs exclusive HackRF access, or use device='rtlsdr:N' for RTL-SDR.",
         "schema": {
             "type": "object",
             "properties": {
                 "duration_sec": {"type": "integer", "description": "Scan duration in seconds (default 60)"},
+                "device": {"type": "string", "description": "SDR device: 'hackrf' (default) or 'rtlsdr:N' for RTL-SDR device index N"},
             },
             "required": [],
         },
@@ -725,11 +753,12 @@ TOOL_REGISTRY: dict[str, dict] = {
         "fn": _dumphfdl_start,
     },
     "dumpvdl2_start": {
-        "description": "Decode VDL Mode 2 aircraft datalink on 136-137 MHz — ACARS over VHF digital radio, very active near airports. Needs exclusive HackRF access.",
+        "description": "Decode VDL Mode 2 aircraft datalink on 136-137 MHz — ACARS over VHF digital radio, very active near airports. Needs exclusive HackRF access, or use device='rtlsdr:N' for RTL-SDR.",
         "schema": {
             "type": "object",
             "properties": {
                 "duration_sec": {"type": "integer", "description": "Scan duration in seconds (default 60)"},
+                "device": {"type": "string", "description": "SDR device: 'hackrf' (default) or 'rtlsdr:N' for RTL-SDR device index N"},
             },
             "required": [],
         },
@@ -777,12 +806,13 @@ TOOL_REGISTRY: dict[str, dict] = {
         "fn": _gpredict_stop,
     },
     "rtl433_start": {
-        "description": "Decode 433/868/315 MHz ISM band sensors automatically — weather stations, tire pressure, doorbells, power meters etc. Needs exclusive HackRF access, stops GQRX first.",
+        "description": "Decode 433/868/315 MHz ISM band sensors automatically — weather stations, tire pressure, doorbells, power meters etc. Needs exclusive HackRF access, or use device='rtlsdr:N' for RTL-SDR.",
         "schema": {
             "type": "object",
             "properties": {
                 "freq_mhz":     {"type": "number",  "description": "Center frequency in MHz (default 433.92 for EU, try 315.0 for US)"},
                 "duration_sec": {"type": "integer", "description": "Scan duration in seconds (default 30)"},
+                "device": {"type": "string", "description": "SDR device: 'hackrf' (default) or 'rtlsdr:N' for RTL-SDR device index N"},
             },
             "required": [],
         },
@@ -831,6 +861,48 @@ TOOL_REGISTRY: dict[str, dict] = {
             "required": [],
         },
         "fn": _dsdfme_decode,
+    },
+
+    # RTL-SDR (3)
+    "rtlsdr_info": {
+        "description": "List connected RTL-SDR devices by index, or get info on a specific device. RTL-SDR and HackRF can run simultaneously — they are independent USB devices.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "device_index": {"type": "integer", "description": "Optional: get info on this specific RTL-SDR device index"},
+            },
+            "required": [],
+        },
+        "fn": _rtlsdr_info,
+    },
+    "rtlsdr_capture": {
+        "description": "Capture raw IQ data from an RTL-SDR device (receive only, 24-1766 MHz). Can run simultaneously with HackRF. Use device_index to select which RTL-SDR.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "freq_mhz": {"type": "number", "description": "Center frequency in MHz (24-1766)"},
+                "duration_sec": {"type": "integer", "description": "Capture duration in seconds (default 10)"},
+                "device_index": {"type": "integer", "description": "RTL-SDR device index (default 0)"},
+                "sample_rate_msps": {"type": "number", "description": "Sample rate in MSPS (default 2.048, max ~2.8)"},
+                "output_path": {"type": "string", "description": "Output file path (default auto-named in ~/sdr-captures/)"},
+            },
+            "required": ["freq_mhz"],
+        },
+        "fn": _rtlsdr_capture,
+    },
+    "rtlsdr_power": {
+        "description": "Frequency power survey across a range using RTL-SDR (equivalent of hackrf_sweep but for RTL-SDR). Can run simultaneously with HackRF. Returns top signals by power.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "freq_min_mhz": {"type": "number", "description": "Start frequency in MHz"},
+                "freq_max_mhz": {"type": "number", "description": "End frequency in MHz"},
+                "device_index": {"type": "integer", "description": "RTL-SDR device index (default 0)"},
+                "integration_sec": {"type": "integer", "description": "Integration time in seconds (default 10)"},
+            },
+            "required": ["freq_min_mhz", "freq_max_mhz"],
+        },
+        "fn": _rtlsdr_power,
     },
 
     # Self-management (2)

@@ -314,34 +314,53 @@ def satdump_stop() -> str:
 
 # ── dump1090 ──────────────────────────────────────────────────────────────
 
-def dump1090_start(duration_sec: int = 60) -> str:
+def dump1090_start(duration_sec: int = 60, device: str = "hackrf") -> str:
     """
     Start dump1090 for ADS-B aircraft decoding.
-    Needs exclusive HackRF access — stops GQRX first.
-    Opens web interface on http://localhost:8080
+    Opens web interface on http://localhost:8080.
+    device="hackrf" — uses HackRF (dump1090 doesn't natively support HackRF well).
+    device="rtlsdr" or "rtlsdr:N" — uses RTL-SDR device index N (recommended).
     """
-    others = _stop_hardware_holders(exclude="dump1090")
-    msg_others = f" (stopped: {', '.join(others)})" if others else ""
+    import shutil as _shutil
+
+    dev_idx = None
+    msg_others = ""
+    if device.startswith("rtlsdr"):
+        parts = device.split(":", 1)
+        dev_idx = int(parts[1]) if len(parts) > 1 else 0
+    else:
+        # HackRF path — stop any hardware holders first and warn
+        others = _stop_hardware_holders(exclude="dump1090")
+        msg_others = f" (stopped: {', '.join(others)})" if others else ""
 
     if _is_running("dump1090"):
-        return f"dump1090 already running{msg_others}. Web interface: http://localhost:8080"
+        return "dump1090 already running. Web interface: http://localhost:8080"
 
-    # Try both package name variants
     for binary in ["dump1090", "dump1090-mutability", "dump1090-fa"]:
-        rc, _, _ = _run(["which", binary])
-        if rc == 0:
-            subprocess.Popen(
-                [binary, "--interactive", "--net", "--gain", "-10"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            time.sleep(3)
-            if _is_running(binary):
-                return (
-                    f"dump1090 started{msg_others}. "
-                    "Web map: http://localhost:8080  "
-                    "Terminal: run 'dump1090 --interactive' in a separate window."
+        if not _shutil.which(binary):
+            continue
+        cmd = [binary, "--interactive", "--net", "--gain", "-10"]
+        if dev_idx is not None:
+            cmd += ["--device-index", str(dev_idx)]
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        time.sleep(3)
+        if _is_running(binary):
+            if dev_idx is not None:
+                extra = f" (RTL-SDR device {dev_idx})"
+            else:
+                extra = (
+                    " Note: dump1090 does not natively support HackRF — "
+                    "use device='rtlsdr:N' for best results."
                 )
+            return (
+                f"dump1090 started{msg_others}{extra}. "
+                "Web map: http://localhost:8080  "
+                "Terminal: run 'dump1090 --interactive' in a separate window."
+            )
 
     return "dump1090 not found — try: sudo apt install dump1090-mutability"
 
@@ -745,29 +764,36 @@ def gpredict_stop() -> str:
 
 # ── rtl_433 ──────────────────────────────────────────────────────────────
 
-def rtl433_start(freq_mhz: float = 433.92, duration_sec: int = 30) -> str:
+def rtl433_start(freq_mhz: float = 433.92, duration_sec: int = 30, device: str = "hackrf") -> str:
     """
     Run rtl_433 to automatically decode 433/868/915 MHz ISM band sensors:
     weather stations, tire pressure monitors, doorbells, power meters etc.
-    Needs exclusive HackRF access — stop GQRX first.
+    device="hackrf" — uses HackRF via SoapySDR (-d driver=hackrf).
+    device="rtlsdr" or "rtlsdr:N" — uses RTL-SDR device index N (-d N).
     """
-    busy = None
-    try:
-        from .hackrf import _check_hackrf_free
-        busy = _check_hackrf_free()
-    except Exception:
-        pass
-    if busy:
-        return busy
+    import shutil as _shutil
 
-    others = _stop_hardware_holders(exclude="rtl_433")
+    dev_idx = None
+    if device.startswith("rtlsdr"):
+        parts = device.split(":", 1)
+        dev_idx = int(parts[1]) if len(parts) > 1 else 0
+    else:
+        busy = None
+        try:
+            from .hackrf import _check_hackrf_free
+            busy = _check_hackrf_free()
+        except Exception:
+            pass
+        if busy:
+            return busy
+        _stop_hardware_holders(exclude="rtl_433")
 
-    rc, _, _ = _run(["which", "rtl_433"])
-    if rc != 0:
+    if not _shutil.which("rtl_433"):
         return "rtl_433 not found — try: sudo apt install rtl-433"
 
     freq_hz = int(freq_mhz * 1e6)
-    cmd = ["rtl_433", "-d", "driver=hackrf",
+    driver_arg = str(dev_idx) if dev_idx is not None else "driver=hackrf"
+    cmd = ["rtl_433", "-d", driver_arg,
            "-f", str(freq_hz), "-F", "json", "-T", str(duration_sec)]
 
     rc2, out, err = _run(cmd, timeout=duration_sec + 10)
@@ -994,68 +1020,76 @@ def jaero_stop() -> str:
 
 # ── rtl-ais (marine vessel tracking) ─────────────────────────────────────
 
-def rtlais_start(duration_sec: int = 60) -> str:
+def rtlais_start(duration_sec: int = 60, device: str = "hackrf") -> str:
     """
     Decode AIS (Automatic Identification System) marine vessel transponders.
     AIS operates on VHF channels 87B (161.975 MHz) and 88B (162.025 MHz).
     Returns vessel positions, names, MMSI numbers, speed, heading.
-    Needs exclusive HackRF access — stops GQRX first.
+    device="hackrf" — uses HackRF via SoapySDR (-d driver=hackrf).
+    device="rtlsdr" or "rtlsdr:N" — uses RTL-SDR device index N (-d N).
 
     AIS is the maritime equivalent of ADS-B — all commercial vessels
     over 300 gross tons are required to broadcast it.
     """
-    busy = None
-    try:
-        from .hackrf import _check_hackrf_free
-        busy = _check_hackrf_free()
-    except Exception:
-        pass
-    if busy:
-        return busy
+    import shutil as _shutil
 
-    others = _stop_hardware_holders(exclude="rtl-ais")
-    msg_others = f" (stopped: {', '.join(others)})" if others else ""
+    dev_idx = None
+    if device.startswith("rtlsdr"):
+        parts = device.split(":", 1)
+        dev_idx = int(parts[1]) if len(parts) > 1 else 0
+    else:
+        busy = None
+        try:
+            from .hackrf import _check_hackrf_free
+            busy = _check_hackrf_free()
+        except Exception:
+            pass
+        if busy:
+            return busy
+        _stop_hardware_holders(exclude="rtl-ais")
+
+    others = []
+    msg_others = ""
 
     import json as _json
 
-    # rtl-ais uses the RTL-SDR driver name but also supports HackRF via SoapySDR
+    driver_arg = str(dev_idx) if dev_idx is not None else "driver=hackrf"
     for binary in ["rtl-ais", "rtl_ais"]:
-        rc, _, _ = _run(["which", binary])
-        if rc == 0:
-            # Run with SoapySDR HackRF driver, dual-channel AIS
-            cmd = [binary,
-                   "-d", "driver=hackrf",
-                   "-T", str(duration_sec)]
+        if not _shutil.which(binary):
+            continue
+        cmd = [binary,
+               "-d", driver_arg,
+               "-T", str(duration_sec)]
 
-            rc2, out, err = _run(cmd, timeout=duration_sec + 10)
+        rc2, out, err = _run(cmd, timeout=duration_sec + 10)
 
-            vessels = []
-            for line in out.splitlines():
-                line = line.strip()
-                if line.startswith("!AIVDM") or line.startswith("!AIVDO"):
-                    vessels.append(line)
+        vessels = []
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("!AIVDM") or line.startswith("!AIVDO"):
+                vessels.append(line)
 
-            if vessels:
-                return _json.dumps({
-                    "status": "complete",
-                    "freq_mhz": "161.975 / 162.025 (dual channel)",
-                    "duration_sec": duration_sec,
-                    "sentences_decoded": len(vessels),
-                    "nmea_sentences": vessels[:30],
-                    "note": "Pipe output to AIS decoder (e.g. gpsd) for vessel details",
-                }, indent=2)
+        if vessels:
+            return _json.dumps({
+                "status": "complete",
+                "freq_mhz": "161.975 / 162.025 (dual channel)",
+                "duration_sec": duration_sec,
+                "sentences_decoded": len(vessels),
+                "nmea_sentences": vessels[:30],
+                "note": "Pipe output to AIS decoder (e.g. gpsd) for vessel details",
+            }, indent=2)
 
-            return (
-                f"rtl-ais ran for {duration_sec}s{msg_others} — no AIS sentences decoded.\\n"
-                "AIS requires line of sight to vessels — works best near coastlines/harbours.\\n"
-                f"Raw output: {out[:300] or err[:300]}"
-            )
+        return (
+            f"rtl-ais ran for {duration_sec}s{msg_others} — no AIS sentences decoded.\n"
+            "AIS requires line of sight to vessels — works best near coastlines/harbours.\n"
+            f"Raw output: {out[:300] or err[:300]}"
+        )
 
     # Fallback: try via GNU Radio AIS flowgraph if rtl-ais not found
     return (
-        "rtl-ais not found. Alternatives on DragonOS:\\n"
-        "  gr-ais GNU Radio flowgraph in /usr/src/\\n"
-        "  OpenCPN with network AIS input from another decoder\\n"
+        "rtl-ais not found. Alternatives on DragonOS:\n"
+        "  gr-ais GNU Radio flowgraph in /usr/src/\n"
+        "  OpenCPN with network AIS input from another decoder\n"
         "Install: sudo apt install rtl-ais"
     )
 
@@ -1143,38 +1177,50 @@ def dumphfdl_start(
 
 # ── DumpVDL2 (VHF datalink) ───────────────────────────────────────────────
 
-def dumpvdl2_start(duration_sec: int = 60) -> str:
+def dumpvdl2_start(duration_sec: int = 60, device: str = "hackrf") -> str:
     """
     Decode VDL Mode 2 aircraft digital datalink messages on 136-137 MHz.
     VDL2 is the VHF equivalent of HFDL — ACARS over VHF digital radio.
     Much more active than HFDL near airports.
 
     Primary frequencies: 136.900, 136.925, 136.975 MHz
-    Needs exclusive HackRF access — stops GQRX first.
+    device="hackrf" — uses HackRF via SoapySDR (--soapysdr driver=hackrf).
+    device="rtlsdr" or "rtlsdr:N" — uses RTL-SDR (--soapysdr driver=rtlsdr,rtlsdr=N).
     """
-    busy = None
-    try:
-        from .hackrf import _check_hackrf_free
-        busy = _check_hackrf_free()
-    except Exception:
-        pass
-    if busy:
-        return busy
+    import shutil as _shutil
 
-    others = _stop_hardware_holders(exclude="dumpvdl2")
-    msg_others = f" (stopped: {', '.join(others)})" if others else ""
+    dev_idx = None
+    if device.startswith("rtlsdr"):
+        parts = device.split(":", 1)
+        dev_idx = int(parts[1]) if len(parts) > 1 else 0
+    else:
+        busy = None
+        try:
+            from .hackrf import _check_hackrf_free
+            busy = _check_hackrf_free()
+        except Exception:
+            pass
+        if busy:
+            return busy
+        _stop_hardware_holders(exclude="dumpvdl2")
 
-    rc, _, _ = _run(["which", "dumpvdl2"])
-    if rc != 0:
+    msg_others = ""
+
+    if not _shutil.which("dumpvdl2"):
         return (
-            "dumpvdl2 not found — check DragonOS /usr/src/.\\n"
+            "dumpvdl2 not found — check DragonOS /usr/src/.\n"
             "Install: https://github.com/szpajder/dumpvdl2"
         )
 
     import json as _json
 
+    if dev_idx is not None:
+        soapy_arg = f"driver=rtlsdr,rtlsdr={dev_idx}"
+    else:
+        soapy_arg = "driver=hackrf"
+
     cmd = ["dumpvdl2",
-           "--soapysdr", "driver=hackrf",
+           "--soapysdr", soapy_arg,
            "--output", "decoded:json:file:-",
            "136900000", "136925000", "136975000"]
 

@@ -50,6 +50,10 @@ Analysis:
 - gqrx_stop/start/tune/status → control the GQRX SDR receiver
 - app_status        → show what's running and whether HackRF is free
 
+RTL-SDR devices (device_index 0, 1, ...): rtlsdr_info/capture/power, RX only 24-1766 MHz.
+RTL-SDR runs alongside HackRF — no conflict. Two tools cannot share the same device_index.
+rtl433_start/rtlais_start/dumpvdl2_start/dump1090_start accept device="rtlsdr:N" to use RTL-SDR.
+
 Critical: HackRF is exclusive — only one process at a time.
 Call gqrx_stop FIRST before: hackrf_sweep, hackrf_capture, hackrf_replay,
   meshtastic_sniff, adsb_scan, gsm_scan, rtl433_start, rtlais_start, dumpvdl2_start.
@@ -69,6 +73,10 @@ CORE_TOOL_NAMES = {
     "rtl433_start",     # ISM band sensors: weather, tire pressure, power meters (433/868/915 MHz)
     "rtlais_start",     # AIS marine vessel transponders (161/162 MHz)
     "dumpvdl2_start",   # VHF aircraft datalink (136 MHz — near airports)
+    # RTL-SDR dongles (independent from HackRF — run simultaneously)
+    "rtlsdr_info",      # enumerate RTL-SDR devices by index
+    "rtlsdr_capture",   # capture IQ from RTL-SDR (24-1766 MHz, RX only)
+    "rtlsdr_power",     # frequency power survey via RTL-SDR
     # Protocol decoders (passive — work on data already received)
     "interpret_adsb",       # decode raw ADS-B hex frame
     "interpret_ais",        # decode NMEA AIS sentence
