@@ -221,6 +221,7 @@ def chat_loop(model: str) -> None:
                     model=model,
                     messages=history,
                     tools=tools,
+                    think=False,
                 )
                 stop.set()
                 spin.join()
@@ -314,7 +315,7 @@ def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int) 
             ]
 
             for _ in range(4):
-                response = client.chat(model=model, messages=history, tools=tools)
+                response = client.chat(model=model, messages=history, tools=tools, think=False)
                 msg = response.message
                 history.append({
                     "role": "assistant",
