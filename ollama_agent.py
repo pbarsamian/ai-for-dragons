@@ -26,18 +26,29 @@ Three modes — pick one, never mix:
 3. General knowledge question (frequencies, protocols, definitions) → answer in text. No tool call.
 
 Tool guide (use the right tool for the task):
-- hackrf_sweep   → frequency survey; needs a range (freq_max > freq_min, min 1 MHz gap)
-- hackrf_capture → record raw IQ at a single center frequency
-- hackrf_analyze → analyze a previously captured IQ file
-- hackrf_replay  → retransmit a captured IQ file
-- meshtastic_sniff → listen for Meshtastic LoRa packets (US default 906.875 MHz)
-- adsb_scan      → track aircraft via ADS-B transponders at 1090 MHz
-- gsm_scan       → find GSM base stations (US bands: GSM850, PCS1900)
-- identify_frequency → look up what services operate at a given MHz value
-- explain_hex    → decode a raw hex capture; auto-detects ADS-B, AIS, etc.
+Scanning:
+- hackrf_sweep      → frequency survey; needs a RANGE (freq_max > freq_min, min 1 MHz gap)
+- hackrf_capture    → record raw IQ at a single center frequency
+- hackrf_analyze    → analyze a captured IQ file
+- hackrf_replay     → retransmit a captured IQ file
+- meshtastic_sniff  → listen for Meshtastic LoRa (US 906.875 MHz)
+- adsb_scan         → track aircraft via ADS-B at 1090 MHz
+- gsm_scan          → find GSM base stations (US: GSM850 or PCS1900)
+- rtl433_start      → decode ISM sensors at 433/868/915 MHz (weather, tire pressure, meters)
+- rtlais_start      → decode AIS marine vessel transponders (161/162 MHz)
+- dumpvdl2_start    → decode VHF aircraft datalink at 136 MHz
+Decoding raw data:
+- interpret_adsb    → decode a raw ADS-B hex frame
+- interpret_ais     → decode an NMEA AIS sentence
+- interpret_acars   → decode an ACARS aircraft message
+- interpret_pocsag  → decode a POCSAG pager line from multimon-ng
+- interpret_meshtastic → decode a Meshtastic packet JSON
+- explain_hex       → auto-detect and decode an unknown hex string
+Analysis:
+- signal_identify   → identify protocol at a specific frequency
+- identify_frequency → look up what services use a given MHz value
 - gqrx_stop/start/tune/status → control the GQRX SDR receiver
-- signal_identify → identify protocol at a specific frequency
-- app_status     → show what's running and whether HackRF is free
+- app_status        → show what's running and whether HackRF is free
 
 Critical: gqrx_stop before any hackrf_* tool (HackRF is exclusive).
 Sweep workflow: gqrx_stop → hackrf_sweep → gqrx_start → gqrx_tune.
@@ -51,8 +62,17 @@ CORE_TOOL_NAMES = {
     "hackrf_info", "hackrf_sweep", "hackrf_capture", "hackrf_analyze", "hackrf_replay",
     # GQRX SDR receiver
     "gqrx_status", "gqrx_tune", "gqrx_stop", "gqrx_start",
-    # DragonOS protocol scanners
+    # DragonOS protocol scanners (active — use HackRF)
     "meshtastic_sniff", "adsb_scan", "gsm_scan",
+    "rtl433_start",     # ISM band sensors: weather, tire pressure, power meters (433/868/915 MHz)
+    "rtlais_start",     # AIS marine vessel transponders (161/162 MHz)
+    "dumpvdl2_start",   # VHF aircraft datalink (136 MHz — near airports)
+    # Protocol decoders (passive — work on data already received)
+    "interpret_adsb",       # decode raw ADS-B hex frame
+    "interpret_ais",        # decode NMEA AIS sentence
+    "interpret_acars",      # decode ACARS aircraft message
+    "interpret_pocsag",     # decode POCSAG pager line from multimon-ng
+    "interpret_meshtastic", # decode Meshtastic packet JSON
     # Signal analysis
     "signal_identify", "identify_frequency", "explain_hex",
     # App/system status and self-management
@@ -323,7 +343,7 @@ def main() -> None:
     parser.add_argument("--interval", type=int, default=60,
                         help="Watch mode scan interval in seconds (default 60)")
     parser.add_argument("--all-tools", action="store_true",
-                        help="Pass all 73 tools instead of the default core 18 (slower on Pi 5)")
+                        help="Pass all 73 tools instead of the default core 26 (slower on Pi 5)")
     args = parser.parse_args()
 
     if args.watch:
