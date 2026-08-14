@@ -50,7 +50,9 @@ Analysis:
 - gqrx_stop/start/tune/status → control the GQRX SDR receiver
 - app_status        → show what's running and whether HackRF is free
 
-Critical: gqrx_stop before any hackrf_* tool (HackRF is exclusive).
+Critical: HackRF is exclusive — only one process at a time.
+Call gqrx_stop FIRST before: hackrf_sweep, hackrf_capture, hackrf_replay,
+  meshtastic_sniff, adsb_scan, gsm_scan, rtl433_start, rtlais_start, dumpvdl2_start.
 Sweep workflow: gqrx_stop → hackrf_sweep → gqrx_start → gqrx_tune.
 Never reason aloud. Never explain before calling a tool.
 """
@@ -229,19 +231,11 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
             if not msg.tool_calls:
                 content = (msg.content or "").strip()
 
-                # Detect deflection: model suggested a tool instead of answering,
-                # or returned nothing. Retry without tools so it must answer in text.
-                _deflect_words = {
-                    "sweep", "scan", "hackrf", "capture", "let me", "i'll", "i will",
-                    "we can", "use the", "call the", "tool", "initiate", "proceed",
-                }
-                deflecting = (not content) or (
-                    len(content.split()) < 35
-                    and any(w in content.lower() for w in _deflect_words)
-                )
-
-                if deflecting and round_num == 0:
-                    # Pop the deflecting assistant turn; retry without tools
+                # Only retry without tools when the response is completely empty.
+                # Broader deflection detection was too aggressive and intercepted
+                # legitimate short preambles before tool calls, preventing tools
+                # from being called at all.
+                if not content and round_num == 0:
                     history.pop()
                     stop_r = threading.Event()
                     spin_r = threading.Thread(
