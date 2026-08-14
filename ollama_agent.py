@@ -187,7 +187,8 @@ def chat_loop(model: str) -> None:
         sys.exit(1)
     model = resolved  # use exact name Ollama knows
 
-    client  = ollama.Client(timeout=300)
+    import httpx
+    client  = ollama.Client(timeout=httpx.Timeout(connect=10, read=300, write=30, pool=10))
     tools   = build_ollama_tools()
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
 
@@ -224,6 +225,7 @@ def chat_loop(model: str) -> None:
                     messages=history,
                     tools=tools,
                     think=False,
+                    options={"num_predict": 512},
                 )
                 stop.set()
                 spin.join()
@@ -297,7 +299,8 @@ def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int) 
         sys.exit(1)
     model = resolved  # use exact name Ollama knows
 
-    client = ollama.Client(timeout=300)
+    import httpx
+    client = ollama.Client(timeout=httpx.Timeout(connect=10, read=300, write=30, pool=10))
     tools  = build_ollama_tools()
 
     print(f"[dragon-agent] Watch mode: {freq_min}-{freq_max} MHz every {interval_sec}s")
@@ -317,7 +320,7 @@ def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int) 
             ]
 
             for _ in range(4):
-                response = client.chat(model=model, messages=history, tools=tools, think=False)
+                response = client.chat(model=model, messages=history, tools=tools, think=False, options={"num_predict": 512})
                 msg = response.message
                 history.append({
                     "role": "assistant",
