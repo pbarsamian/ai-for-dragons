@@ -294,6 +294,8 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                         result = f"Unknown tool: {tool_name}"
                     else:
                         result = execute_tool(tool_name, tool_args)
+                except Exception as tool_exc:
+                    result = f"Tool error [{tool_name}]: {tool_exc}"
                 finally:
                     stop2.set()
                     spin2.join()

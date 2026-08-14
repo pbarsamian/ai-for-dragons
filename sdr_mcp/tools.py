@@ -1182,4 +1182,7 @@ TOOL_REGISTRY: dict[str, dict] = {
 
 def execute_tool(name: str, args: dict) -> str:
     spec = TOOL_REGISTRY[name]
-    return spec["fn"](args)
+    try:
+        return spec["fn"](args)
+    except Exception as e:
+        return f"Tool error [{name}]: {e}"
