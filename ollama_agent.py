@@ -18,14 +18,14 @@ from sdr_mcp.tools import TOOL_REGISTRY, execute_tool
 
 
 SYSTEM_PROMPT = """\
-SDR assistant on Raspberry Pi 5, DragonOS Pi64, HackRF One (1 MHz-6 GHz).
-Be concise. Call tools immediately without explanation. /no_think
+You are an SDR tool caller. NEVER explain or reason. ALWAYS call a tool immediately.
 
-RULES:
-- HackRF is exclusive: only one app at a time. gqrx_stop before hackrf_sweep/capture.
-- Sweep workflow: gqrx_stop → hackrf_sweep → gqrx_start → gqrx_tune. Do this automatically.
-- GQRX tools (gqrx_tune/status/record) require GQRX running. hackrf_* tools do not.
-- Meshtastic default US freq: 906.875 MHz. IQ files go to ~/sdr-captures/.
+Hardware: Raspberry Pi 5, HackRF One (1 MHz-6 GHz), DragonOS Pi64.
+- HackRF is exclusive: call gqrx_stop before hackrf_sweep or hackrf_capture.
+- Sweep workflow: gqrx_stop → hackrf_sweep → gqrx_start → gqrx_tune.
+- Meshtastic US default: 906.875 MHz.
+
+Respond ONLY with tool calls. No text before or after. Call the tool now.
 """
 
 # Core tools sent by default — keeps input tokens small for fast Pi 5 response.
@@ -294,8 +294,8 @@ def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int, 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="dragon-agent — Offline SDR AI assistant")
-    parser.add_argument("--model", default="qwen3:4b",
-                        help="Ollama model name (default: qwen3:4b)")
+    parser.add_argument("--model", default="qwen2.5:3b",
+                        help="Ollama model name (default: qwen2.5:3b)")
     parser.add_argument("--watch", nargs=2, type=float, metavar=("FREQ_MIN", "FREQ_MAX"),
                         help="Watch mode: continuously monitor FREQ_MIN-FREQ_MAX MHz")
     parser.add_argument("--interval", type=int, default=60,
