@@ -227,7 +227,47 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
             })
 
             if not msg.tool_calls:
-                print(f"\nAssistant: {msg.content}\n")
+                content = (msg.content or "").strip()
+
+                # Detect deflection: model suggested a tool instead of answering,
+                # or returned nothing. Retry without tools so it must answer in text.
+                _deflect_words = {
+                    "sweep", "scan", "hackrf", "capture", "let me", "i'll", "i will",
+                    "we can", "use the", "call the", "tool", "initiate", "proceed",
+                }
+                deflecting = (not content) or (
+                    len(content.split()) < 35
+                    and any(w in content.lower() for w in _deflect_words)
+                )
+
+                if deflecting and round_num == 0:
+                    # Pop the deflecting assistant turn; retry without tools
+                    history.pop()
+                    stop_r = threading.Event()
+                    spin_r = threading.Thread(
+                        target=spinner, args=(stop_r, "Thinking"), daemon=True
+                    )
+                    spin_r.start()
+                    try:
+                        r2 = client.chat(
+                            model=model,
+                            messages=history,
+                            think=False,
+                            options={"num_predict": 1024},
+                        )
+                        content = (r2.message.content or "").strip()
+                        history.append({
+                            "role": "assistant",
+                            "content": content,
+                            "tool_calls": [],
+                        })
+                    except Exception:
+                        pass
+                    finally:
+                        stop_r.set()
+                        spin_r.join()
+
+                print(f"\nAssistant: {content or '[no response — try rephrasing]'}\n")
                 break
 
             # Execute tool calls
