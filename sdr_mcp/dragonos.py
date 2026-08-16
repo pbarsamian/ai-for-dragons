@@ -78,11 +78,14 @@ def signal_identify(freq_mhz: float, bandwidth_khz: float = 200.0) -> str:
     }, indent=2)
 
 
-def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 30) -> str:
+def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 60) -> str:
     """
     Listen for Meshtastic LoRa packets.
     Tries meshtastic-sniffer first; falls back to guidance if not found.
+    Streams packets to stdout in real-time; capped at 300s per call.
     """
+    duration_sec = min(duration_sec, 300)
+
     sniffer = shutil.which("meshtastic-sniffer")
     if not sniffer:
         # Try common build locations
@@ -107,7 +110,6 @@ def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 30) -> str:
         }, indent=2)
 
     freq_hz = int(freq_mhz * 1e6)
-    # Run sniffer with JSON output, timeout after duration
     cmd = [sniffer,
            "--driver", "hackrf",
            "--freq", str(freq_hz),
@@ -115,22 +117,38 @@ def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 30) -> str:
            "--json",
            "--timeout", str(duration_sec)]
 
-    rc, out, err = _run(cmd, timeout=duration_sec + 15)
-
+    start = time.time()
     packets = []
-    for line in out.splitlines():
-        if line.strip().startswith("{"):
-            try:
-                packets.append(json.loads(line))
-            except json.JSONDecodeError:
-                pass
+
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        while time.time() - start < duration_sec:
+            line = proc.stdout.readline()
+            if not line:
+                break
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    pkt = json.loads(line)
+                    packets.append(pkt)
+                    elapsed = int(time.time() - start)
+                    print(f"\n  [meshtastic +{elapsed}s] {json.dumps(pkt, separators=(',', ':'))[:160]}",
+                          flush=True)
+                except json.JSONDecodeError:
+                    pass
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
     return json.dumps({
         "status": "complete",
         "freq_mhz": freq_mhz,
         "duration_sec": duration_sec,
         "packets_decoded": len(packets),
-        "packets": packets[:20],  # cap at 20
+        "packets": packets[:20],
     }, indent=2)
 
 

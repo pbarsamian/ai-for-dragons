@@ -284,7 +284,7 @@ def _signal_identify(args: dict) -> str:
 def _meshtastic_sniff(args: dict) -> str:
     return meshtastic_sniff(
         freq_mhz=float(args.get("freq_mhz", 906.875)),
-        duration_sec=int(args.get("duration_sec", 30)),
+        duration_sec=int(args.get("duration_sec", 60)),
     )
 
 def _adsb_scan(args: dict) -> str:
@@ -1085,12 +1085,12 @@ TOOL_REGISTRY: dict[str, dict] = {
         "fn": _signal_identify,
     },
     "meshtastic_sniff": {
-        "description": "Passively listen for Meshtastic LoRa packets using meshtastic-sniffer. Returns decoded node IDs, GPS, and message text.",
+        "description": "Passively listen for Meshtastic LoRa packets using meshtastic-sniffer. Returns decoded node IDs, GPS, and message text. Prints packets in real-time. Max 300s per call — call multiple times for longer sessions.",
         "schema": {
             "type": "object",
             "properties": {
                 "freq_mhz":     {"type": "number",  "description": "Center frequency (default 906.875 MHz — US LongFast)"},
-                "duration_sec": {"type": "integer", "description": "Listen duration in seconds (default 30)"},
+                "duration_sec": {"type": "integer", "description": "Listen duration in seconds (default 60, max 300)", "maximum": 300},
             },
             "required": [],
         },
