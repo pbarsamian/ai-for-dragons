@@ -242,6 +242,13 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                 "tool_calls": [tc.model_dump() for tc in (msg.tool_calls or [])],
             })
 
+            # Always show the model's reasoning/content immediately so the user
+            # can see what it decided before any long-running tool executes.
+            model_text = (msg.content or "").strip()
+            if model_text:
+                label = "Reasoning" if msg.tool_calls else "Assistant"
+                print(f"\n{label}: {model_text}")
+
             if not msg.tool_calls:
                 content = (msg.content or "").strip()
 
@@ -282,14 +289,14 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                     finally:
                         stop_r.set()
                         spin_r.join()
+                    # Print the retry content (initial was empty so model_text didn't show it)
+                    if content:
+                        print(f"\nAssistant: {content}")
 
-                print(f"\nAssistant: {content or '[no response — try rephrasing]'}\n")
+                if not content and not model_text:
+                    print("\nAssistant: [no response — try rephrasing]")
+                print()
                 break
-
-            # Show model's plan/preamble if it came alongside tool calls
-            preamble = (msg.content or "").strip()
-            if preamble:
-                print(f"\nPlan: {preamble}")
 
             # Execute tool calls
             for tc in msg.tool_calls:
