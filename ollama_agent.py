@@ -18,47 +18,31 @@ from sdr_mcp.tools import TOOL_REGISTRY, execute_tool
 
 
 SYSTEM_PROMPT = """\
-You are an SDR tool caller on a Raspberry Pi 5 with HackRF One (1 MHz-6 GHz).
+RULE: Hardware actions → output ONLY the tool call. Zero words before or after. No plan, no acknowledgment, no explanation. The tool call IS your entire response.
 
-Three modes — pick one, never mix:
-1. New hardware action → call a tool immediately. No text before or after.
-2. Question about results already shown in this conversation → answer in text. No tool call.
-3. General knowledge question (frequencies, protocols, definitions) → answer in text. No tool call.
+You are an SDR assistant on Raspberry Pi 5 with HackRF One (1 MHz-6 GHz).
 
-Tool guide (use the right tool for the task):
-Scanning:
-- hackrf_sweep      → frequency survey; needs a RANGE (freq_max > freq_min, min 1 MHz gap)
-- hackrf_capture    → record raw IQ at a single center frequency
-- hackrf_analyze    → analyze a captured IQ file
-- hackrf_replay     → retransmit a captured IQ file
-- meshtastic_sniff  → listen for Meshtastic LoRa (US 906.875 MHz); duration_sec can be anything (1800 = 30 min)
-- adsb_scan         → track aircraft via ADS-B at 1090 MHz
-- gsm_scan          → find GSM base stations (US: GSM850 or PCS1900)
-- rtl433_start      → decode ISM sensors at 433/868/915 MHz (weather, tire pressure, meters)
-- rtlais_start      → decode AIS marine vessel transponders (161/162 MHz)
-- dumpvdl2_start    → decode VHF aircraft datalink at 136 MHz
-Decoding raw data:
-- interpret_adsb    → decode a raw ADS-B hex frame
-- interpret_ais     → decode an NMEA AIS sentence
-- interpret_acars   → decode an ACARS aircraft message
-- interpret_pocsag  → decode a POCSAG pager line from multimon-ng
-- interpret_meshtastic → decode a Meshtastic packet JSON
-- explain_hex       → auto-detect and decode an unknown hex string
-Analysis:
-- signal_identify   → identify protocol at a specific frequency
-- identify_frequency → look up what services use a given MHz value
-- gqrx_stop/start/tune/status → control the GQRX SDR receiver
-- app_status        → show what's running and whether HackRF is free
+When to use tools vs text:
+- User requests a hardware action → tool call only, immediately
+- User asks about results already shown → text only
+- User asks a general RF question → text only
 
-RTL-SDR devices (device_index 0, 1, ...): rtlsdr_info/capture/power, RX only 24-1766 MHz.
-RTL-SDR runs alongside HackRF — no conflict. Two tools cannot share the same device_index.
-rtl433_start/rtlais_start/dumpvdl2_start/dump1090_start accept device="rtlsdr:N" to use RTL-SDR.
+Key tools:
+  hackrf_sweep(freq_min, freq_max)           wideband spectrum survey
+  hackrf_capture / analyze / replay          IQ file operations
+  meshtastic_sniff(freq_mhz, duration_sec)   LoRa packets; US=906.875 MHz, duration unlimited
+  adsb_scan(duration_sec)                    aircraft ADS-B at 1090 MHz
+  gsm_scan(band)                             GSM base stations
+  rtl433_start / rtlais_start / dumpvdl2_start  ISM/AIS/VDL2 decoders
+  rtlsdr_info / rtlsdr_capture / rtlsdr_power   RTL-SDR (RX only, 24-1766 MHz, runs alongside HackRF)
+  interpret_adsb/ais/acars/pocsag/meshtastic decode captured frames
+  explain_hex / signal_identify / identify_frequency  signal analysis
+  gqrx_stop / gqrx_start / gqrx_tune / gqrx_status  GQRX receiver control
+  app_status                                 check what's running and HackRF availability
 
-Critical: HackRF is exclusive — only one process at a time.
-Call gqrx_stop FIRST before: hackrf_sweep, hackrf_capture, hackrf_replay,
+HackRF exclusivity: only one process at a time.
+Call gqrx_stop before: hackrf_sweep, hackrf_capture, hackrf_replay,
   meshtastic_sniff, adsb_scan, gsm_scan, rtl433_start, rtlais_start, dumpvdl2_start.
-Sweep workflow: gqrx_stop → hackrf_sweep → gqrx_start → gqrx_tune.
-Never reason aloud. Never explain before calling a tool.
 """
 
 # Core tools sent by default — keeps input tokens small for fast Pi 5 response.
@@ -235,7 +219,7 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                     messages=history,
                     tools=tools,
                     think=False,
-                    options={"num_predict": 512},
+                    options={"num_predict": 1024, "temperature": 0},
                 )
                 stop.set()
                 spin.join()
@@ -261,10 +245,18 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
             if not msg.tool_calls:
                 content = (msg.content or "").strip()
 
-                # Only retry without tools when the response is completely empty.
-                # Broader deflection detection was too aggressive and intercepted
-                # legitimate short preambles before tool calls, preventing tools
-                # from being called at all.
+                # Round 0 produced text but no tool call — nudge once.
+                # Short content (< 200 chars) that ends without terminal punctuation
+                # is almost certainly a preamble ("I'll listen...", "Let me...").
+                # We pop it, inject a forcing message, and let the loop continue.
+                if content and round_num == 0 and len(content) < 200 and not content.endswith((".", "?", "!")):
+                    history.pop()
+                    history.append({"role": "assistant", "content": content, "tool_calls": []})
+                    history.append({"role": "user", "content": "Call the tool now."})
+                    print(f"\n[nudging — calling tool...]\n")
+                    continue
+
+                # Empty response on round 0 — retry without tools to get a text answer.
                 if not content and round_num == 0:
                     history.pop()
                     stop_r = threading.Event()
@@ -277,7 +269,7 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                             model=model,
                             messages=history,
                             think=False,
-                            options={"num_predict": 1024},
+                            options={"num_predict": 1024, "temperature": 0},
                         )
                         content = (r2.message.content or "").strip()
                         history.append({
