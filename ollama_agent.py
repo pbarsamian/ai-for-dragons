@@ -162,6 +162,31 @@ def build_ollama_tools(all_tools: bool = False) -> list[dict]:
     return tools
 
 
+def _show_result(result: str, max_items: int = 8) -> None:
+    """Print a compact, readable summary of a tool result."""
+    try:
+        data = json.loads(result)
+    except (json.JSONDecodeError, ValueError):
+        for line in result.strip().splitlines()[:max_items]:
+            print(f"   {line[:120]}")
+        return
+
+    if not isinstance(data, dict):
+        print(f"   {str(data)[:200]}")
+        return
+
+    for k, v in list(data.items())[:max_items]:
+        if isinstance(v, list):
+            print(f"   {k}: [{len(v)} item{'s' if len(v) != 1 else ''}]")
+        elif isinstance(v, dict):
+            inner = ", ".join(f"{ik}: {iv}" for ik, iv in list(v.items())[:3])
+            print(f"   {k}: {{{inner}}}")
+        else:
+            print(f"   {k}: {str(v)[:120]}")
+    if len(data) > max_items:
+        print(f"   ... ({len(data) - max_items} more fields)")
+
+
 def chat_loop(model: str, all_tools: bool = False) -> None:
     try:
         import ollama
@@ -200,11 +225,8 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
         # Agentic loop: model may call tools multiple times
         for round_num in range(8):
             stop = threading.Event()
-            spin = threading.Thread(
-                target=spinner,
-                args=(stop, "Thinking" if round_num == 0 else "Running tool"),
-                daemon=True,
-            )
+            spin_msg = "Thinking" if round_num == 0 else "Analyzing results"
+            spin = threading.Thread(target=spinner, args=(stop, spin_msg), daemon=True)
             spin.start()
 
             try:
@@ -272,6 +294,11 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                 print(f"\nAssistant: {content or '[no response — try rephrasing]'}\n")
                 break
 
+            # Show model's plan/preamble if it came alongside tool calls
+            preamble = (msg.content or "").strip()
+            if preamble:
+                print(f"\nPlan: {preamble}")
+
             # Execute tool calls
             for tc in msg.tool_calls:
                 tool_name = tc.function.name
@@ -282,8 +309,14 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                     except json.JSONDecodeError:
                         tool_args = {}
 
-                print(f"[tool] {tool_name}({json.dumps(tool_args, separators=(',', ':'))})")
+                bar = "─" * max(0, 52 - len(tool_name))
+                print(f"\n── {tool_name} {bar}")
+                if tool_args:
+                    w = max(len(k) for k in tool_args)
+                    for k, v in tool_args.items():
+                        print(f"   {k:<{w}} : {v}")
 
+                t0 = time.time()
                 stop2 = threading.Event()
                 spin2 = threading.Thread(
                     target=spinner, args=(stop2, f"Running {tool_name}"), daemon=True
@@ -300,7 +333,9 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                     stop2.set()
                     spin2.join()
 
-                print(f"[result] {result[:300]}{'...' if len(result) > 300 else ''}\n")
+                elapsed = time.time() - t0
+                print(f"   completed in {elapsed:.1f}s")
+                _show_result(result)
                 history.append({
                     "role": "tool",
                     "content": result,
