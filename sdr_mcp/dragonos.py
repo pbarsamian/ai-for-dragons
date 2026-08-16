@@ -82,10 +82,9 @@ def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 60) -> str:
     """
     Listen for Meshtastic LoRa packets.
     Tries meshtastic-sniffer first; falls back to guidance if not found.
-    Streams packets to stdout in real-time; capped at 300s per call.
+    Streams packets to stdout in real-time. Uses a 5s per-read select()
+    timeout so a silently-crashed process is detected quickly.
     """
-    duration_sec = min(duration_sec, 300)
-
     sniffer = shutil.which("meshtastic-sniffer")
     if not sniffer:
         # Try common build locations
@@ -120,9 +119,16 @@ def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 60) -> str:
     start = time.time()
     packets = []
 
+    import select
+
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         while time.time() - start < duration_sec:
+            ready, _, _ = select.select([proc.stdout], [], [], 5.0)
+            if not ready:
+                if proc.poll() is not None:
+                    break
+                continue
             line = proc.stdout.readline()
             if not line:
                 break

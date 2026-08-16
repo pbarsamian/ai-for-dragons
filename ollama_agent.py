@@ -31,7 +31,7 @@ Scanning:
 - hackrf_capture    → record raw IQ at a single center frequency
 - hackrf_analyze    → analyze a captured IQ file
 - hackrf_replay     → retransmit a captured IQ file
-- meshtastic_sniff  → listen for Meshtastic LoRa (US 906.875 MHz); max 300s per call, call multiple times for longer sessions
+- meshtastic_sniff  → listen for Meshtastic LoRa (US 906.875 MHz); duration_sec can be anything (1800 = 30 min)
 - adsb_scan         → track aircraft via ADS-B at 1090 MHz
 - gsm_scan          → find GSM base stations (US: GSM850 or PCS1900)
 - rtl433_start      → decode ISM sensors at 433/868/915 MHz (weather, tire pressure, meters)
