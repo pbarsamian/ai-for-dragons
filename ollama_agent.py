@@ -201,7 +201,7 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
     model = resolved  # use exact name Ollama knows
 
     import httpx
-    client  = ollama.Client(timeout=httpx.Timeout(connect=10, read=300, write=30, pool=10))
+    client  = ollama.Client(timeout=httpx.Timeout(connect=10, read=None, write=30, pool=10))
     tools   = build_ollama_tools(all_tools)
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
 
@@ -357,7 +357,7 @@ def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int, 
     model = resolved  # use exact name Ollama knows
 
     import httpx
-    client = ollama.Client(timeout=httpx.Timeout(connect=10, read=300, write=30, pool=10))
+    client = ollama.Client(timeout=httpx.Timeout(connect=10, read=None, write=30, pool=10))
     tools  = build_ollama_tools(all_tools)
 
     print(f"[dragon-agent] Watch mode: {freq_min}-{freq_max} MHz every {interval_sec}s")
