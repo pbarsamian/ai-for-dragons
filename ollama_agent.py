@@ -172,36 +172,6 @@ def _show_result(result: str, max_items: int = 8) -> None:
         print(f"   ... ({len(data) - max_items} more fields)")
 
 
-def _stream_chat(client, *, model: str, messages: list, tools: list | None = None,
-                 label: str = "Thinking", opts: dict) -> tuple:
-    """
-    Stream a chat response, printing content tokens as they arrive.
-    Returns (content_str, final_message_obj).
-    Prints "label..." while waiting for the first token, then switches to
-    "Assistant: <tokens>" once content starts flowing. For tool-call-only
-    responses (no content), just prints a newline after the label line.
-    """
-    print(f"\n{label}...", end="", flush=True)
-    content_buf = ""
-    final_msg = None
-    kwargs = dict(model=model, messages=messages, stream=True, think=False, options=opts)
-    if tools is not None:
-        kwargs["tools"] = tools
-
-    for chunk in client.chat(**kwargs):
-        c = chunk.message.content or ""
-        if c:
-            if not content_buf:
-                # First content token: move past the "label..." line
-                print(f"\nAssistant: ", end="", flush=True)
-            print(c, end="", flush=True)
-            content_buf += c
-        final_msg = chunk.message
-
-    print()  # newline — either after streamed text, or after the "label..." line
-    return content_buf, final_msg
-
-
 def chat_loop(model: str, all_tools: bool = False) -> None:
     try:
         import ollama
@@ -219,8 +189,7 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
     client  = ollama.Client(timeout=httpx.Timeout(connect=10, read=None, write=30, pool=10))
     tools   = build_ollama_tools(all_tools)
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
-    # num_ctx caps the KV-cache size — halving it from the model default
-    # meaningfully reduces per-token computation on Pi 5 CPU.
+    # num_ctx caps KV-cache — reduces per-token computation on Pi 5 CPU.
     opts = {"num_predict": 512, "num_ctx": 4096}
 
     tool_count = len(tools)
@@ -242,30 +211,48 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
 
         # Agentic loop: model may call tools multiple times
         for round_num in range(8):
-            label = "Thinking" if round_num == 0 else "Analyzing results"
+            stop = threading.Event()
+            spin_msg = "Thinking" if round_num == 0 else "Analyzing results"
+            spin = threading.Thread(target=spinner, args=(stop, spin_msg), daemon=True)
+            spin.start()
+
             try:
-                content, msg = _stream_chat(
-                    client, model=model, messages=history,
-                    tools=tools, label=label, opts=opts,
+                response = client.chat(
+                    model=model,
+                    messages=history,
+                    tools=tools,
+                    think=False,
+                    options=opts,
                 )
+                stop.set()
+                spin.join()
             except KeyboardInterrupt:
+                stop.set()
+                spin.join()
                 print("\n[interrupted]")
                 break
             except Exception as e:
+                stop.set()
+                spin.join()
                 print(f"\n[dragon-agent] Ollama error: {e}")
                 print("[dragon-agent] Is Ollama still running? Check: sudo systemctl status ollama")
                 break
 
-            if msg is None:
-                break
-
+            msg = response.message
             history.append({
                 "role": "assistant",
-                "content": content,
+                "content": msg.content or "",
                 "tool_calls": [tc.model_dump() for tc in (msg.tool_calls or [])],
             })
 
+            model_text = (msg.content or "").strip()
+            if model_text:
+                label = "Reasoning" if msg.tool_calls else "Assistant"
+                print(f"\n{label}: {model_text}")
+
             if not msg.tool_calls:
+                content = (msg.content or "").strip()
+
                 # Round 0 produced text but no tool call — nudge once.
                 # Short content (< 200 chars) that ends without terminal punctuation
                 # is almost certainly a preamble ("I'll listen...", "Let me...").
@@ -273,22 +260,28 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                     history.pop()
                     history.append({"role": "assistant", "content": content, "tool_calls": []})
                     history.append({"role": "user", "content": "Call the tool now."})
-                    print("[nudging — calling tool...]")
+                    print("\n[nudging — calling tool...]\n")
                     continue
 
                 # Empty response on round 0 — retry without tools to get a text answer.
                 if not content and round_num == 0:
                     history.pop()
+                    stop_r = threading.Event()
+                    spin_r = threading.Thread(target=spinner, args=(stop_r, "Thinking"), daemon=True)
+                    spin_r.start()
                     try:
-                        content, msg2 = _stream_chat(
-                            client, model=model, messages=history,
-                            tools=None, label="Thinking", opts=opts,
-                        )
+                        r2 = client.chat(model=model, messages=history, think=False, options=opts)
+                        content = (r2.message.content or "").strip()
                         history.append({"role": "assistant", "content": content, "tool_calls": []})
                     except Exception:
                         pass
+                    finally:
+                        stop_r.set()
+                        spin_r.join()
+                    if content:
+                        print(f"\nAssistant: {content}")
 
-                if not content:
+                if not content and not model_text:
                     print("\nAssistant: [no response — try rephrasing]")
                 print()
                 break
