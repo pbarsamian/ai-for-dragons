@@ -24,6 +24,69 @@ def _run(cmd: list[str], timeout: int = 60, env: dict | None = None) -> tuple[in
         return -1, "", f"Timed out after {timeout}s"
 
 
+# Maps device type names to meshtastic-sniffer CLI flags
+_DEVICE_FLAGS: dict[str, str] = {
+    "hackrf":  "--hackrf",
+    "rtlsdr":  "--rtlsdr",
+    "airspy":  "--airspy",
+    "bladerf": "--bladerf",
+    "sdrplay": "--sdrplay",
+    "usrp":    "--usrp",
+}
+
+
+def detect_radios() -> list[dict]:
+    """
+    Probe for connected SDR hardware.
+    Returns a list of dicts: {type, driver_flag, description}.
+    Checks HackRF, RTL-SDR (all indices), and Airspy.
+    """
+    found = []
+
+    # HackRF — hackrf_info exits 0 only when a device is present
+    if shutil.which("hackrf_info"):
+        rc, out, _ = _run(["hackrf_info"], timeout=5)
+        if rc == 0:
+            serial = next(
+                (ln.split(":", 1)[-1].strip() for ln in out.splitlines() if "Serial number" in ln),
+                "unknown",
+            )
+            found.append({
+                "type": "hackrf",
+                "driver_flag": "--hackrf",
+                "description": f"HackRF One (S/N {serial})",
+            })
+
+    # RTL-SDR — rtl_test -t exits rc=1 even when devices exist; parse both streams
+    if shutil.which("rtl_test"):
+        _, out, err = _run(["rtl_test", "-t"], timeout=10)
+        for line in (out + err).splitlines():
+            s = line.strip()
+            if s and s[0].isdigit() and ":" in s:
+                try:
+                    idx, desc = s.split(":", 1)
+                    found.append({
+                        "type": "rtlsdr",
+                        "driver_flag": "--rtlsdr",
+                        "description": f"RTL-SDR #{idx.strip()}: {desc.strip()}",
+                        "index": int(idx.strip()),
+                    })
+                except (ValueError, IndexError):
+                    pass
+
+    # Airspy — airspy_info exits 0 when a device is attached
+    if shutil.which("airspy_info"):
+        rc, out, _ = _run(["airspy_info"], timeout=5)
+        if rc == 0 and "airspy" in out.lower():
+            found.append({
+                "type": "airspy",
+                "driver_flag": "--airspy",
+                "description": "Airspy",
+            })
+
+    return found
+
+
 def signal_identify(freq_mhz: float, bandwidth_khz: float = 200.0) -> str:
     """
     Heuristic signal identification based on frequency.
@@ -78,12 +141,12 @@ def signal_identify(freq_mhz: float, bandwidth_khz: float = 200.0) -> str:
     }, indent=2)
 
 
-def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 60) -> str:
+def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 60, device: str = "auto") -> str:
     """
-    Listen for Meshtastic LoRa packets.
-    Tries meshtastic-sniffer first; falls back to guidance if not found.
-    Streams packets to stdout in real-time. Uses a 5s per-read select()
-    timeout so a silently-crashed process is detected quickly.
+    Listen for Meshtastic LoRa packets using meshtastic-sniffer.
+    device="auto" probes for connected SDRs; if exactly one found it is used
+    automatically; if multiple, returns a list so the caller can ask the user.
+    Streams packets + stats heartbeats in real-time. No hard duration cap.
     """
     sniffer = shutil.which("meshtastic-sniffer")
     if not sniffer:
@@ -108,16 +171,39 @@ def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 60) -> str:
             "alternative": "Use Meshtastic_SDR with GNU Radio — see exercise ex11_meshtastic_rx",
         }, indent=2)
 
+    # ── Resolve which SDR to use ──────────────────────────────────────────
+    if device == "auto":
+        radios = detect_radios()
+        if not radios:
+            return json.dumps({
+                "status": "no_radio",
+                "message": "No SDR device detected. Check USB connections and try again.",
+            }, indent=2)
+        if len(radios) > 1:
+            return json.dumps({
+                "status": "multiple_radios",
+                "message": (
+                    "Multiple SDR devices found. Re-call meshtastic_sniff with "
+                    "device= set to your choice (e.g. 'hackrf', 'rtlsdr')."
+                ),
+                "devices": [{"id": r["type"], "description": r["description"]} for r in radios],
+            }, indent=2)
+        driver_flag = radios[0]["driver_flag"]
+        print(f"\n  [auto] Using {radios[0]['description']}", flush=True)
+    else:
+        base = device.split(":")[0].lower()
+        driver_flag = _DEVICE_FLAGS.get(base, f"--{base}")
+
     freq_hz = int(freq_mhz * 1e6)
-    # Correct flags per alphafox02/meshtastic-sniffer options.c:
-    #   --hackrf          selects HackRF backend (no value)
-    #   --center=<hz>     center frequency in Hz
-    #   --rate=<sps>      sample rate (2 MSPS covers single-channel LongFast)
-    #   --keys=default    decrypt with built-in default keys
-    # JSON packets stream to stdout automatically; stats heartbeat goes to stderr.
-    # No --timeout flag exists — we terminate the process ourselves.
+    # meshtastic-sniffer (alphafox02) correct flags:
+    #   --hackrf / --rtlsdr / --airspy  select SDR backend
+    #   --center=<hz>   center frequency in Hz
+    #   --rate=<sps>    sample rate (2 MSPS for single LongFast channel)
+    #   --keys=default  decrypt with built-in default keys
+    # JSON packets stream to stdout; [stats] heartbeat every 5s to stderr.
+    # No --timeout flag — we terminate the process after duration_sec.
     cmd = [sniffer,
-           "--hackrf",
+           driver_flag,
            f"--center={freq_hz}",
            "--rate=2000000",
            "--keys=default"]

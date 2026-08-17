@@ -285,6 +285,7 @@ def _meshtastic_sniff(args: dict) -> str:
     return meshtastic_sniff(
         freq_mhz=float(args.get("freq_mhz", 906.875)),
         duration_sec=int(args.get("duration_sec", 60)),
+        device=str(args.get("device", "auto")),
     )
 
 def _adsb_scan(args: dict) -> str:
@@ -1085,12 +1086,18 @@ TOOL_REGISTRY: dict[str, dict] = {
         "fn": _signal_identify,
     },
     "meshtastic_sniff": {
-        "description": "Passively listen for Meshtastic LoRa packets using meshtastic-sniffer. Returns decoded node IDs, GPS, and message text. Prints packets in real-time as they arrive. Duration is unlimited — use 1800 for 30 minutes, etc.",
+        "description": (
+            "Passively listen for Meshtastic LoRa packets using meshtastic-sniffer. "
+            "Auto-detects connected SDR; if multiple radios are found, returns a list "
+            "so you can ask the user which to use. Prints packets and stats in real-time. "
+            "Duration is unlimited — use 1800 for 30 min, 3600 for 1 hour."
+        ),
         "schema": {
             "type": "object",
             "properties": {
-                "freq_mhz":     {"type": "number",  "description": "Center frequency (default 906.875 MHz — US LongFast)"},
-                "duration_sec": {"type": "integer", "description": "Listen duration in seconds (default 60; use 1800 for 30 min, 3600 for 1 hour)"},
+                "freq_mhz":     {"type": "number",  "description": "Center frequency in MHz (default 906.875 — US LongFast)"},
+                "duration_sec": {"type": "integer", "description": "Listen duration in seconds (default 60; use 1800 for 30 min)"},
+                "device":       {"type": "string",  "description": "SDR to use: 'auto' (default), 'hackrf', 'rtlsdr', 'airspy', 'bladerf'"},
             },
             "required": [],
         },
