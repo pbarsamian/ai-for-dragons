@@ -289,7 +289,10 @@ def _meshtastic_sniff(args: dict) -> str:
     )
 
 def _adsb_scan(args: dict) -> str:
-    return adsb_scan(duration_sec=int(args.get("duration_sec", 30)))
+    return adsb_scan(
+        duration_sec=int(args.get("duration_sec", 30)),
+        device=str(args.get("device", "auto")),
+    )
 
 def _gsm_scan(args: dict) -> str:
     return gsm_scan(band=args.get("band", "GSM850"))
@@ -1104,11 +1107,18 @@ TOOL_REGISTRY: dict[str, dict] = {
         "fn": _meshtastic_sniff,
     },
     "adsb_scan": {
-        "description": "Run dump1090 to decode ADS-B aircraft transponder signals at 1090 MHz. Returns aircraft list with ICAO, callsign, position, altitude.",
+        "description": (
+            "Decode ADS-B aircraft transponders at 1090 MHz. "
+            "Auto-detects the best available radio+decoder: RTL-SDR+dump1090 preferred, "
+            "HackRF+modes_rx (gr-air-modes) as fallback. "
+            "Returns aircraft list with ICAO, callsign, position, altitude. "
+            "If multiple viable combinations exist, returns a list so you can ask the user which to use."
+        ),
         "schema": {
             "type": "object",
             "properties": {
                 "duration_sec": {"type": "integer", "description": "Scan duration in seconds (default 30)"},
+                "device":       {"type": "string",  "description": "Radio to use: 'auto' (default), 'rtlsdr', 'rtlsdr:N' (device index N), 'hackrf'"},
             },
             "required": [],
         },

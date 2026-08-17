@@ -32,7 +32,7 @@ Key tools:
   hackrf_sweep(freq_min, freq_max)           wideband spectrum survey
   hackrf_capture / analyze / replay          IQ file operations
   meshtastic_sniff(freq_mhz, duration_sec)   LoRa packets; US=906.875 MHz, duration unlimited
-  adsb_scan(duration_sec)                    aircraft ADS-B at 1090 MHz
+  adsb_scan(duration_sec, device)            aircraft ADS-B at 1090 MHz; auto-selects RTL-SDR or HackRF
   gsm_scan(band)                             GSM base stations
   rtl433_start / rtlais_start / dumpvdl2_start  ISM/AIS/VDL2 decoders
   rtlsdr_info / rtlsdr_capture / rtlsdr_power   RTL-SDR (RX only, 24-1766 MHz, runs alongside HackRF)

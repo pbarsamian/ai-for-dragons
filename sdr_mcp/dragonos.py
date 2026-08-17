@@ -258,7 +258,8 @@ def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 60, device: 
     }, indent=2)
 
 
-def adsb_scan(duration_sec: int = 30) -> str:
+def _adsb_dump1090(duration_sec: int, dev_idx: int = 0) -> str:
+    """ADS-B via dump1090 + RTL-SDR. Writes aircraft.json every ~1s, polls it."""
     import tempfile
     import shutil as _shutil
 
@@ -268,19 +269,16 @@ def adsb_scan(duration_sec: int = 30) -> str:
     if not dump1090:
         return json.dumps({
             "status": "tool_not_found",
-            "message": "dump1090 not found. On DragonOS it should be pre-installed.",
+            "message": "dump1090 not found.",
             "install": "sudo apt install dump1090-mutability",
         }, indent=2)
 
-    # dump1090-mutability/fa correct flags:
-    #   --net          opens SBS output on :30003 and HTTP on :8080
-    #   --quiet        suppress status text to stdout
-    #   --write-json   writes aircraft.json to dir every ~1s
-    # No --json stdout flag exists — it exits immediately on unknown args.
+    # --net          opens HTTP/SBS ports; --write-json writes aircraft.json
+    # --device-index selects which RTL-SDR when multiple are attached
     tmpdir = tempfile.mkdtemp(prefix="dump1090_")
-    cmd = [dump1090, "--quiet", "--net", "--write-json", tmpdir]
+    cmd = [dump1090, "--quiet", "--net", "--write-json", tmpdir,
+           "--device-index", str(dev_idx)]
     aircraft_file = os.path.join(tmpdir, "aircraft.json")
-
     start = time.time()
     aircraft: dict = {}
 
@@ -288,15 +286,13 @@ def adsb_scan(duration_sec: int = 30) -> str:
     try:
         while time.time() - start < duration_sec:
             if proc.poll() is not None:
-                # Process exited — likely can't open RTL-SDR device
-                stderr_out = proc.stderr.read() if proc.stderr else ""
+                err = (proc.stderr.read() or "").strip()[:400]
                 _shutil.rmtree(tmpdir, ignore_errors=True)
                 return json.dumps({
                     "status": "error",
-                    "message": "dump1090 exited early — RTL-SDR device may be busy or unplugged.",
-                    "detail": stderr_out[:400].strip(),
+                    "message": "dump1090 exited early — RTL-SDR may be busy or unplugged.",
+                    "detail": err,
                 }, indent=2)
-
             if os.path.exists(aircraft_file):
                 try:
                     with open(aircraft_file) as f:
@@ -306,10 +302,9 @@ def adsb_scan(duration_sec: int = 30) -> str:
                         if icao:
                             aircraft[icao] = ac
                     elapsed = int(time.time() - start)
-                    print(f"\n  [adsb +{elapsed}s] {len(aircraft)} aircraft tracked", flush=True)
+                    print(f"\n  [adsb +{elapsed}s] {len(aircraft)} aircraft (dump1090/RTL-SDR)", flush=True)
                 except (json.JSONDecodeError, OSError):
                     pass
-
             time.sleep(2)
     finally:
         proc.terminate()
@@ -321,11 +316,189 @@ def adsb_scan(duration_sec: int = 30) -> str:
 
     return json.dumps({
         "status": "complete",
+        "backend": "rtlsdr+dump1090",
         "freq_mhz": 1090.0,
         "duration_sec": duration_sec,
         "aircraft_seen": len(aircraft),
         "aircraft": list(aircraft.values())[:30],
     }, indent=2)
+
+
+def _adsb_modes_rx(duration_sec: int) -> str:
+    """ADS-B via gr-air-modes (modes_rx) + HackRF through osmosdr."""
+    import re
+    import select as _select
+
+    modes_rx = shutil.which("modes_rx")
+    if not modes_rx:
+        return json.dumps({
+            "status": "tool_not_found",
+            "message": "modes_rx (gr-air-modes) not found.",
+            "install": "sudo apt install gr-air-modes",
+            "note": "gr-air-modes decodes ADS-B using HackRF via GNU Radio osmosdr.",
+        }, indent=2)
+
+    # modes_rx with osmosdr source — supports HackRF, RTL-SDR, Airspy, etc.
+    # --args "hackrf=0" pins to HackRF when multiple SDRs are connected.
+    # Gain 40 is a safe starting point; HackRF has IF+BB gain stages.
+    cmd = [modes_rx, "-s", "osmocom", "--args", "hackrf=0", "-g", "40"]
+
+    # Regex patterns for modes_rx text output (robust across versions)
+    ICAO_RE = re.compile(r'\bAA[=:\s]+([0-9a-fA-F]{6})\b', re.I)
+    ALT_RE  = re.compile(r'\bAlt(?:itude)?[=:\s]+(-?\d+)', re.I)
+    LAT_RE  = re.compile(r'\bLat(?:itude)?[=:\s]+([-\d.]+)', re.I)
+    LON_RE  = re.compile(r'\bLon(?:gitude)?[=:\s]+([-\d.]+)', re.I)
+    CALL_RE = re.compile(r'\b(?:Callsign|Ident)[=:\s]+([A-Z0-9]{3,8})\b', re.I)
+
+    start = time.time()
+    aircraft: dict = {}
+
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        while time.time() - start < duration_sec:
+            ready, _, _ = _select.select([proc.stdout, proc.stderr], [], [], 5.0)
+            if not ready:
+                if proc.poll() is not None:
+                    break
+                continue
+            for fd in ready:
+                line = fd.readline()
+                if not line:
+                    if proc.poll() is not None:
+                        break
+                    continue
+                line = line.strip()
+                if not line:
+                    continue
+
+                m_icao = ICAO_RE.search(line)
+                if m_icao:
+                    icao = m_icao.group(1).lower()
+                    ac = aircraft.setdefault(icao, {"hex": icao})
+                    m = ALT_RE.search(line)
+                    if m:
+                        ac["altitude"] = int(m.group(1))
+                    m = LAT_RE.search(line)
+                    if m:
+                        ac["lat"] = float(m.group(1))
+                    m = LON_RE.search(line)
+                    if m:
+                        ac["lon"] = float(m.group(1))
+                    m = CALL_RE.search(line)
+                    if m:
+                        ac["flight"] = m.group(1)
+                    elapsed = int(time.time() - start)
+                    print(
+                        f"\n  [adsb +{elapsed}s] {icao}"
+                        f" {ac.get('flight', '')}"
+                        f" alt={ac.get('altitude', '?')}",
+                        flush=True,
+                    )
+                elif fd is proc.stderr and line:
+                    # Show stderr startup messages (e.g. gain applied, device opened)
+                    elapsed = int(time.time() - start)
+                    print(f"\n  [modes_rx +{elapsed}s] {line}", flush=True)
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+    return json.dumps({
+        "status": "complete",
+        "backend": "hackrf+modes_rx",
+        "freq_mhz": 1090.0,
+        "duration_sec": duration_sec,
+        "aircraft_seen": len(aircraft),
+        "aircraft": list(aircraft.values())[:30],
+    }, indent=2)
+
+
+def adsb_scan(duration_sec: int = 30, device: str = "auto") -> str:
+    """
+    Decode ADS-B aircraft transponders at 1090 MHz.
+
+    device="auto"      — detect connected radios; prefer RTL-SDR+dump1090
+                         (purpose-built for ADS-B), fall back to HackRF+modes_rx.
+                         If only one radio is attached it is used automatically.
+                         If multiple radios with multiple viable backends are
+                         found, returns a list so the caller can ask the user.
+    device="rtlsdr"    — force RTL-SDR device 0
+    device="rtlsdr:N"  — force RTL-SDR device index N
+    device="hackrf"    — force HackRF via gr-air-modes (modes_rx)
+    """
+    if device == "auto":
+        radios = detect_radios()
+        if not radios:
+            return json.dumps({
+                "status": "no_radio",
+                "message": "No SDR device detected. Check USB connections.",
+            }, indent=2)
+
+        rtlsdrs = [r for r in radios if r["type"] == "rtlsdr"]
+        hackrfs  = [r for r in radios if r["type"] == "hackrf"]
+
+        dump1090_bin = (shutil.which("dump1090")
+                        or shutil.which("dump1090-fa")
+                        or shutil.which("dump1090-mutability"))
+        modes_rx_bin = shutil.which("modes_rx")
+
+        # Build list of viable (radio, backend) options
+        options = []
+        if rtlsdrs and dump1090_bin:
+            for r in rtlsdrs:
+                options.append({"radio": r, "backend": "dump1090",
+                                 "id": f"rtlsdr:{r.get('index', 0)}"})
+        if hackrfs and modes_rx_bin:
+            options.append({"radio": hackrfs[0], "backend": "modes_rx",
+                             "id": "hackrf"})
+
+        if not options:
+            # Hardware present but missing software
+            missing = []
+            if rtlsdrs and not dump1090_bin:
+                missing.append("RTL-SDR detected but dump1090 missing (sudo apt install dump1090-mutability)")
+            if hackrfs and not modes_rx_bin:
+                missing.append("HackRF detected but modes_rx missing (sudo apt install gr-air-modes)")
+            return json.dumps({
+                "status": "tool_not_found",
+                "message": "Required decoder software not found.",
+                "details": missing,
+            }, indent=2)
+
+        if len(options) == 1:
+            opt = options[0]
+            print(f"\n  [auto] Using {opt['radio']['description']} with {opt['backend']}", flush=True)
+            if opt["backend"] == "dump1090":
+                return _adsb_dump1090(duration_sec, dev_idx=opt["radio"].get("index", 0))
+            else:
+                return _adsb_modes_rx(duration_sec)
+
+        # Multiple viable options — ask the user to choose
+        return json.dumps({
+            "status": "multiple_options",
+            "message": (
+                "Multiple SDR + decoder combinations available. "
+                "Re-call adsb_scan with device= set to your choice."
+            ),
+            "options": [
+                {"id": o["id"],
+                 "description": f"{o['radio']['description']} → {o['backend']}"}
+                for o in options
+            ],
+        }, indent=2)
+
+    # Explicit device selection
+    if device.startswith("rtlsdr"):
+        parts = device.split(":", 1)
+        idx = int(parts[1]) if len(parts) > 1 else 0
+        return _adsb_dump1090(duration_sec, dev_idx=idx)
+
+    if device == "hackrf":
+        return _adsb_modes_rx(duration_sec)
+
+    return json.dumps({"status": "error", "message": f"Unknown device '{device}'. Use 'auto', 'rtlsdr', 'rtlsdr:N', or 'hackrf'."}, indent=2)
 
 
 def gsm_scan(band: str = "GSM850") -> str:
