@@ -18,6 +18,7 @@ from sdr_mcp.tools import TOOL_REGISTRY, execute_tool
 
 
 SYSTEM_PROMPT = """\
+/no_think
 RULE: Hardware actions → output ONLY the tool call. Zero words before or after. No plan, no acknowledgment, no explanation. The tool call IS your entire response.
 
 You are an SDR assistant on Raspberry Pi 5 with HackRF One (1 MHz-6 GHz).
@@ -219,7 +220,7 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                     messages=history,
                     tools=tools,
                     think=False,
-                    options={"num_predict": 1024, "temperature": 0},
+                    options={"num_predict": 512},
                 )
                 stop.set()
                 spin.join()
@@ -276,7 +277,7 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                             model=model,
                             messages=history,
                             think=False,
-                            options={"num_predict": 1024, "temperature": 0},
+                            options={"num_predict": 512},
                         )
                         content = (r2.message.content or "").strip()
                         history.append({
