@@ -259,7 +259,12 @@ def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 60, device: 
 
 
 def adsb_scan(duration_sec: int = 30) -> str:
-    dump1090 = shutil.which("dump1090")
+    import tempfile
+    import shutil as _shutil
+
+    dump1090 = (shutil.which("dump1090")
+                or shutil.which("dump1090-fa")
+                or shutil.which("dump1090-mutability"))
     if not dump1090:
         return json.dumps({
             "status": "tool_not_found",
@@ -267,26 +272,52 @@ def adsb_scan(duration_sec: int = 30) -> str:
             "install": "sudo apt install dump1090-mutability",
         }, indent=2)
 
-    cmd = [dump1090, "--quiet", "--json", "--lat", "0", "--lon", "0"]
-    start = time.time()
-    aircraft = {}
+    # dump1090-mutability/fa correct flags:
+    #   --net          opens SBS output on :30003 and HTTP on :8080
+    #   --quiet        suppress status text to stdout
+    #   --write-json   writes aircraft.json to dir every ~1s
+    # No --json stdout flag exists — it exits immediately on unknown args.
+    tmpdir = tempfile.mkdtemp(prefix="dump1090_")
+    cmd = [dump1090, "--quiet", "--net", "--write-json", tmpdir]
+    aircraft_file = os.path.join(tmpdir, "aircraft.json")
 
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    start = time.time()
+    aircraft: dict = {}
+
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     try:
         while time.time() - start < duration_sec:
-            line = proc.stdout.readline()
-            if not line:
-                break
-            try:
-                frame = json.loads(line)
-                icao = frame.get("hex", "")
-                if icao:
-                    aircraft[icao] = frame
-            except json.JSONDecodeError:
-                pass
+            if proc.poll() is not None:
+                # Process exited — likely can't open RTL-SDR device
+                stderr_out = proc.stderr.read() if proc.stderr else ""
+                _shutil.rmtree(tmpdir, ignore_errors=True)
+                return json.dumps({
+                    "status": "error",
+                    "message": "dump1090 exited early — RTL-SDR device may be busy or unplugged.",
+                    "detail": stderr_out[:400].strip(),
+                }, indent=2)
+
+            if os.path.exists(aircraft_file):
+                try:
+                    with open(aircraft_file) as f:
+                        data = json.load(f)
+                    for ac in data.get("aircraft", []):
+                        icao = ac.get("hex", "")
+                        if icao:
+                            aircraft[icao] = ac
+                    elapsed = int(time.time() - start)
+                    print(f"\n  [adsb +{elapsed}s] {len(aircraft)} aircraft tracked", flush=True)
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+            time.sleep(2)
     finally:
         proc.terminate()
-        proc.wait(timeout=5)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        _shutil.rmtree(tmpdir, ignore_errors=True)
 
     return json.dumps({
         "status": "complete",
