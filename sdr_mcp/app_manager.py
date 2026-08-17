@@ -85,6 +85,81 @@ def _wait_for_port(port: int, timeout_sec: int = 20) -> bool:
     return False
 
 
+def _resolve_sdr_device(device: str, allowed: tuple = ("hackrf", "rtlsdr")) -> "dict | str":
+    """
+    Resolve device="auto" to a concrete SDR selection, or validate an explicit one.
+
+    Returns dict  {"type": "hackrf"|"rtlsdr", "index": int|None, "description": str}
+    Returns str   JSON error payload — caller should return it immediately.
+
+    allowed: which radio types are valid for the calling tool.
+    """
+    import json as _json
+
+    if device != "auto":
+        if device == "hackrf":
+            if "hackrf" not in allowed:
+                return _json.dumps({"status": "error",
+                    "message": "HackRF not supported by this tool."}, indent=2)
+            return {"type": "hackrf", "index": None, "description": "HackRF One"}
+        if device.startswith("rtlsdr"):
+            if "rtlsdr" not in allowed:
+                return _json.dumps({"status": "error",
+                    "message": "RTL-SDR not supported by this tool."}, indent=2)
+            parts = device.split(":", 1)
+            idx = int(parts[1]) if len(parts) > 1 else 0
+            return {"type": "rtlsdr", "index": idx, "description": f"RTL-SDR #{idx}"}
+        return _json.dumps({"status": "error",
+            "message": f"Unknown device '{device}'. Use 'auto', 'hackrf', or 'rtlsdr:N'."}, indent=2)
+
+    # Auto-detect
+    try:
+        from .dragonos import detect_radios
+        radios = detect_radios()
+    except Exception as exc:
+        return _json.dumps({"status": "error",
+            "message": f"Radio detection failed: {exc}"}, indent=2)
+
+    if not radios:
+        return _json.dumps({"status": "no_radio",
+            "message": "No SDR device detected. Check USB connections."}, indent=2)
+
+    compatible = [r for r in radios if r["type"] in allowed]
+    if not compatible:
+        detected = [r["description"] for r in radios]
+        return _json.dumps({
+            "status": "no_compatible_radio",
+            "message": (
+                f"Detected radio(s) {detected} cannot be used by this tool. "
+                f"Supported: {list(allowed)}."
+            ),
+        }, indent=2)
+
+    if len(compatible) == 1:
+        r = compatible[0]
+        print(f"\n  [auto] Using {r['description']}", flush=True)
+        return {
+            "type": r["type"],
+            "index": r.get("index", 0) if r["type"] == "rtlsdr" else None,
+            "description": r["description"],
+        }
+
+    # Multiple compatible radios — return a choice list
+    return _json.dumps({
+        "status": "multiple_radios",
+        "message": (
+            "Multiple SDR devices found. Re-call with device= set to your choice."
+        ),
+        "devices": [
+            {
+                "id": f"rtlsdr:{r.get('index', 0)}" if r["type"] == "rtlsdr" else r["type"],
+                "description": r["description"],
+            }
+            for r in compatible
+        ],
+    }, indent=2)
+
+
 # ── Hardware exclusivity ───────────────────────────────────────────────────
 
 GROUP_A = {
@@ -764,41 +839,44 @@ def gpredict_stop() -> str:
 
 # ── rtl_433 ──────────────────────────────────────────────────────────────
 
-def rtl433_start(freq_mhz: float = 433.92, duration_sec: int = 30, device: str = "hackrf") -> str:
+def rtl433_start(freq_mhz: float = 433.92, duration_sec: int = 30, device: str = "auto") -> str:
     """
     Run rtl_433 to automatically decode 433/868/915 MHz ISM band sensors:
     weather stations, tire pressure monitors, doorbells, power meters etc.
-    device="hackrf" — uses HackRF via SoapySDR (-d driver=hackrf).
-    device="rtlsdr" or "rtlsdr:N" — uses RTL-SDR device index N (-d N).
+    device="auto"   — detect connected SDR; single radio used automatically,
+                      multiple returns a choice list for the user.
+    device="hackrf" — HackRF via SoapySDR (-d driver=hackrf).
+    device="rtlsdr" or "rtlsdr:N" — RTL-SDR device index N (-d N).
     """
     import shutil as _shutil
+    import json as _json
 
-    dev_idx = None
-    if device.startswith("rtlsdr"):
-        parts = device.split(":", 1)
-        dev_idx = int(parts[1]) if len(parts) > 1 else 0
-    else:
-        busy = None
+    resolved = _resolve_sdr_device(device, allowed=("hackrf", "rtlsdr"))
+    if isinstance(resolved, str):
+        return resolved
+
+    if resolved["type"] == "hackrf":
         try:
             from .hackrf import _check_hackrf_free
             busy = _check_hackrf_free()
+            if busy:
+                return busy
         except Exception:
             pass
-        if busy:
-            return busy
         _stop_hardware_holders(exclude="rtl_433")
+        driver_arg = "driver=hackrf"
+    else:
+        driver_arg = str(resolved["index"])
 
     if not _shutil.which("rtl_433"):
         return "rtl_433 not found — try: sudo apt install rtl-433"
 
     freq_hz = int(freq_mhz * 1e6)
-    driver_arg = str(dev_idx) if dev_idx is not None else "driver=hackrf"
     cmd = ["rtl_433", "-d", driver_arg,
            "-f", str(freq_hz), "-F", "json", "-T", str(duration_sec)]
 
     rc2, out, err = _run(cmd, timeout=duration_sec + 10)
 
-    import json as _json
     decoded = []
     for line in out.splitlines():
         line = line.strip()
@@ -810,6 +888,8 @@ def rtl433_start(freq_mhz: float = 433.92, duration_sec: int = 30, device: str =
 
     if decoded:
         return _json.dumps({
+            "status": "complete",
+            "backend": resolved["description"],
             "freq_mhz": freq_mhz,
             "duration_sec": duration_sec,
             "devices_decoded": len(decoded),
@@ -817,8 +897,8 @@ def rtl433_start(freq_mhz: float = 433.92, duration_sec: int = 30, device: str =
         }, indent=2)
 
     return (
-        f"rtl_433 ran for {duration_sec}s on {freq_mhz} MHz — no devices decoded.\\n"
-        "Try: 433.92 MHz (EU/AU), 315.0 MHz (US garage/tire), 868.35 MHz (EU meters).\\n"
+        f"rtl_433 ran for {duration_sec}s on {freq_mhz} MHz — no devices decoded.\n"
+        "Try: 433.92 MHz (EU/AU), 315.0 MHz (US garage/tire), 868.35 MHz (EU meters).\n"
         f"Raw output: {out[:300] or err[:300]}"
     )
 
@@ -1020,47 +1100,42 @@ def jaero_stop() -> str:
 
 # ── rtl-ais (marine vessel tracking) ─────────────────────────────────────
 
-def rtlais_start(duration_sec: int = 60, device: str = "hackrf") -> str:
+def rtlais_start(duration_sec: int = 60, device: str = "auto") -> str:
     """
     Decode AIS (Automatic Identification System) marine vessel transponders.
     AIS operates on VHF channels 87B (161.975 MHz) and 88B (162.025 MHz).
     Returns vessel positions, names, MMSI numbers, speed, heading.
-    device="hackrf" — uses HackRF via SoapySDR (-d driver=hackrf).
-    device="rtlsdr" or "rtlsdr:N" — uses RTL-SDR device index N (-d N).
+    device="auto"   — detect connected SDR automatically.
+    device="hackrf" — HackRF via SoapySDR (-d driver=hackrf).
+    device="rtlsdr" or "rtlsdr:N" — RTL-SDR device index N (-d N).
 
     AIS is the maritime equivalent of ADS-B — all commercial vessels
     over 300 gross tons are required to broadcast it.
     """
     import shutil as _shutil
+    import json as _json
 
-    dev_idx = None
-    if device.startswith("rtlsdr"):
-        parts = device.split(":", 1)
-        dev_idx = int(parts[1]) if len(parts) > 1 else 0
-    else:
-        busy = None
+    resolved = _resolve_sdr_device(device, allowed=("hackrf", "rtlsdr"))
+    if isinstance(resolved, str):
+        return resolved
+
+    if resolved["type"] == "hackrf":
         try:
             from .hackrf import _check_hackrf_free
             busy = _check_hackrf_free()
+            if busy:
+                return busy
         except Exception:
             pass
-        if busy:
-            return busy
         _stop_hardware_holders(exclude="rtl-ais")
+        driver_arg = "driver=hackrf"
+    else:
+        driver_arg = str(resolved["index"])
 
-    others = []
-    msg_others = ""
-
-    import json as _json
-
-    driver_arg = str(dev_idx) if dev_idx is not None else "driver=hackrf"
     for binary in ["rtl-ais", "rtl_ais"]:
         if not _shutil.which(binary):
             continue
-        cmd = [binary,
-               "-d", driver_arg,
-               "-T", str(duration_sec)]
-
+        cmd = [binary, "-d", driver_arg, "-T", str(duration_sec)]
         rc2, out, err = _run(cmd, timeout=duration_sec + 10)
 
         vessels = []
@@ -1072,6 +1147,7 @@ def rtlais_start(duration_sec: int = 60, device: str = "hackrf") -> str:
         if vessels:
             return _json.dumps({
                 "status": "complete",
+                "backend": resolved["description"],
                 "freq_mhz": "161.975 / 162.025 (dual channel)",
                 "duration_sec": duration_sec,
                 "sentences_decoded": len(vessels),
@@ -1080,12 +1156,11 @@ def rtlais_start(duration_sec: int = 60, device: str = "hackrf") -> str:
             }, indent=2)
 
         return (
-            f"rtl-ais ran for {duration_sec}s{msg_others} — no AIS sentences decoded.\n"
+            f"rtl-ais ran for {duration_sec}s — no AIS sentences decoded.\n"
             "AIS requires line of sight to vessels — works best near coastlines/harbours.\n"
             f"Raw output: {out[:300] or err[:300]}"
         )
 
-    # Fallback: try via GNU Radio AIS flowgraph if rtl-ais not found
     return (
         "rtl-ais not found. Alternatives on DragonOS:\n"
         "  gr-ais GNU Radio flowgraph in /usr/src/\n"
@@ -1099,6 +1174,7 @@ def rtlais_start(duration_sec: int = 60, device: str = "hackrf") -> str:
 def dumphfdl_start(
     freq_list: list = None,
     duration_sec: int = 60,
+    device: str = "auto",
 ) -> str:
     """
     Decode HFDL (High Frequency Data Link) aircraft messages on HF frequencies.
@@ -1108,34 +1184,55 @@ def dumphfdl_start(
     Common HFDL frequencies (USB mode, kHz):
       2998, 4681, 5652, 6532, 8825, 10081, 11384, 13270, 17901 kHz
 
+    HackRF-only: HFDL is at 2-17 MHz. RTL-SDR starts at 24 MHz and cannot
+    receive these bands without an upconverter.
     HackRF can receive HF directly (1 MHz+) but sensitivity is poor without
     an upconverter or HF antenna. Best results with a long wire antenna.
-    Needs exclusive HackRF access.
     """
+    import json as _json
+
     if freq_list is None:
         freq_list = [8825, 11384, 13270]  # most active globally
 
-    busy = None
+    # HFDL only works with HackRF (or upconverter). RTL-SDR starts at 24 MHz.
+    resolved = _resolve_sdr_device(device, allowed=("hackrf",))
+    if isinstance(resolved, str):
+        # Check if RTL-SDR is what's connected — give an informative error
+        try:
+            from .dragonos import detect_radios
+            radios = detect_radios()
+            rtlsdrs = [r for r in radios if r["type"] == "rtlsdr"]
+            if rtlsdrs and not any(r["type"] == "hackrf" for r in radios):
+                return _json.dumps({
+                    "status": "no_compatible_radio",
+                    "message": (
+                        "HFDL operates on 2-17 MHz shortwave. "
+                        "RTL-SDR only receives 24 MHz and above — it cannot tune to HF without an upconverter. "
+                        "A HackRF One is required for HFDL decoding."
+                    ),
+                }, indent=2)
+        except Exception:
+            pass
+        return resolved
+
     try:
         from .hackrf import _check_hackrf_free
         busy = _check_hackrf_free()
+        if busy:
+            return busy
     except Exception:
         pass
-    if busy:
-        return busy
 
     others = _stop_hardware_holders(exclude="dumphfdl")
     msg_others = f" (stopped: {', '.join(others)})" if others else ""
 
-    rc, _, _ = _run(["which", "dumphfdl"])
-    if rc != 0:
+    import shutil as _shutil
+    if not _shutil.which("dumphfdl"):
         return (
-            "dumphfdl not found — check DragonOS /usr/src/.\\n"
-            "Install: https://github.com/szpajder/dumphfdl\\n"
+            "dumphfdl not found — check DragonOS /usr/src/.\n"
+            "Install: https://github.com/szpajder/dumphfdl\n"
             "Note: HFDL requires a good HF antenna (long wire, 10-20m)."
         )
-
-    import json as _json
 
     freq_args = []
     for f in freq_list:
@@ -1153,14 +1250,14 @@ def dumphfdl_start(
         line = line.strip()
         if line.startswith("{"):
             try:
-                import json
-                messages.append(json.loads(line))
+                messages.append(_json.loads(line))
             except Exception:
                 pass
 
     if messages:
         return _json.dumps({
             "status": "complete",
+            "backend": "hackrf",
             "frequencies_khz": freq_list,
             "duration_sec": duration_sec,
             "messages_decoded": len(messages),
@@ -1168,56 +1265,51 @@ def dumphfdl_start(
         }, indent=2)
 
     return (
-        f"dumphfdl ran for {duration_sec}s on {freq_list} kHz{msg_others}\\n"
-        "No messages decoded — HF propagation is variable.\\n"
-        "Try different frequencies or times of day.\\n"
+        f"dumphfdl ran for {duration_sec}s on {freq_list} kHz{msg_others}\n"
+        "No messages decoded — HF propagation is variable.\n"
+        "Try different frequencies or times of day.\n"
         f"Output: {out[:200] or err[:200]}"
     )
 
 
 # ── DumpVDL2 (VHF datalink) ───────────────────────────────────────────────
 
-def dumpvdl2_start(duration_sec: int = 60, device: str = "hackrf") -> str:
+def dumpvdl2_start(duration_sec: int = 60, device: str = "auto") -> str:
     """
     Decode VDL Mode 2 aircraft digital datalink messages on 136-137 MHz.
     VDL2 is the VHF equivalent of HFDL — ACARS over VHF digital radio.
     Much more active than HFDL near airports.
 
     Primary frequencies: 136.900, 136.925, 136.975 MHz
-    device="hackrf" — uses HackRF via SoapySDR (--soapysdr driver=hackrf).
-    device="rtlsdr" or "rtlsdr:N" — uses RTL-SDR (--soapysdr driver=rtlsdr,rtlsdr=N).
+    device="auto"   — detect connected SDR automatically.
+    device="hackrf" — HackRF via SoapySDR (--soapysdr driver=hackrf).
+    device="rtlsdr" or "rtlsdr:N" — RTL-SDR (--soapysdr driver=rtlsdr,rtlsdr=N).
     """
     import shutil as _shutil
+    import json as _json
 
-    dev_idx = None
-    if device.startswith("rtlsdr"):
-        parts = device.split(":", 1)
-        dev_idx = int(parts[1]) if len(parts) > 1 else 0
-    else:
-        busy = None
+    resolved = _resolve_sdr_device(device, allowed=("hackrf", "rtlsdr"))
+    if isinstance(resolved, str):
+        return resolved
+
+    if resolved["type"] == "hackrf":
         try:
             from .hackrf import _check_hackrf_free
             busy = _check_hackrf_free()
+            if busy:
+                return busy
         except Exception:
             pass
-        if busy:
-            return busy
         _stop_hardware_holders(exclude="dumpvdl2")
-
-    msg_others = ""
+        soapy_arg = "driver=hackrf"
+    else:
+        soapy_arg = f"driver=rtlsdr,rtlsdr={resolved['index']}"
 
     if not _shutil.which("dumpvdl2"):
         return (
             "dumpvdl2 not found — check DragonOS /usr/src/.\n"
             "Install: https://github.com/szpajder/dumpvdl2"
         )
-
-    import json as _json
-
-    if dev_idx is not None:
-        soapy_arg = f"driver=rtlsdr,rtlsdr={dev_idx}"
-    else:
-        soapy_arg = "driver=hackrf"
 
     cmd = ["dumpvdl2",
            "--soapysdr", soapy_arg,
@@ -1231,14 +1323,14 @@ def dumpvdl2_start(duration_sec: int = 60, device: str = "hackrf") -> str:
         line = line.strip()
         if line.startswith("{"):
             try:
-                import json
-                messages.append(json.loads(line))
+                messages.append(_json.loads(line))
             except Exception:
                 pass
 
     if messages:
         return _json.dumps({
             "status": "complete",
+            "backend": resolved["description"],
             "frequencies_mhz": [136.9, 136.925, 136.975],
             "duration_sec": duration_sec,
             "messages_decoded": len(messages),
@@ -1246,7 +1338,7 @@ def dumpvdl2_start(duration_sec: int = 60, device: str = "hackrf") -> str:
         }, indent=2)
 
     return (
-        f"dumpvdl2 ran for {duration_sec}s{msg_others} — no VDL2 messages decoded.\\n"
-        "Works best within ~200km of a major airport.\\n"
+        f"dumpvdl2 ran for {duration_sec}s — no VDL2 messages decoded.\n"
+        "Works best within ~200km of a major airport.\n"
         f"Output: {out[:200] or err[:200]}"
     )

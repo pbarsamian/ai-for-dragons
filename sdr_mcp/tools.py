@@ -295,7 +295,7 @@ def _adsb_scan(args: dict) -> str:
     )
 
 def _gsm_scan(args: dict) -> str:
-    return gsm_scan(band=args.get("band", "GSM850"))
+    return gsm_scan(band=args.get("band", "GSM850"), device=args.get("device", "auto"))
 
 def _flowgraph_run(args: dict) -> str:
     return flowgraph_run(
@@ -422,11 +422,12 @@ def _fldigi_stop(args: dict)  -> str:            return fldigi_stop()
 def _jaero_start(args: dict) -> str:    return jaero_start()
 def _jaero_stop(args: dict) -> str:     return jaero_stop()
 def _rtlais_start(args: dict) -> str:
-    return rtlais_start(int(args.get("duration_sec", 60)), device=args.get("device", "hackrf"))
+    return rtlais_start(int(args.get("duration_sec", 60)), device=args.get("device", "auto"))
 def _dumphfdl_start(args: dict) -> str:
-    return dumphfdl_start(args.get("freq_list", None), int(args.get("duration_sec", 60)))
+    return dumphfdl_start(args.get("freq_list", None), int(args.get("duration_sec", 60)),
+                          device=args.get("device", "auto"))
 def _dumpvdl2_start(args: dict) -> str:
-    return dumpvdl2_start(int(args.get("duration_sec", 60)), device=args.get("device", "hackrf"))
+    return dumpvdl2_start(int(args.get("duration_sec", 60)), device=args.get("device", "auto"))
 
 
 def _wireshark_open(args: dict) -> str:  return wireshark_open(args.get("capture_file", ""))
@@ -438,7 +439,7 @@ def _wsjtx_stop(args: dict) -> str:      return wsjtx_stop()
 def _gpredict_start(args: dict) -> str:  return gpredict_start()
 def _gpredict_stop(args: dict) -> str:   return gpredict_stop()
 def _rtl433_start(args: dict) -> str:
-    return rtl433_start(float(args.get("freq_mhz", 433.92)), int(args.get("duration_sec", 30)), device=args.get("device", "hackrf"))
+    return rtl433_start(float(args.get("freq_mhz", 433.92)), int(args.get("duration_sec", 30)), device=args.get("device", "auto"))
 
 
 def _rtlsdr_info(args: dict) -> str:
@@ -733,36 +734,50 @@ TOOL_REGISTRY: dict[str, dict] = {
         "fn": _jaero_stop,
     },
     "rtlais_start": {
-        "description": "Decode AIS marine vessel transponders on 161.975/162.025 MHz — the maritime equivalent of ADS-B. Returns vessel positions, MMSI, speed, heading. Needs exclusive HackRF access, or use device='rtlsdr:N' for RTL-SDR.",
+        "description": (
+            "Decode AIS marine vessel transponders on 161.975/162.025 MHz — the maritime equivalent of ADS-B. "
+            "Returns vessel positions, MMSI, speed, heading. "
+            "Auto-detects connected SDR (HackRF or RTL-SDR); single radio used automatically, "
+            "multiple returns a choice list."
+        ),
         "schema": {
             "type": "object",
             "properties": {
                 "duration_sec": {"type": "integer", "description": "Scan duration in seconds (default 60)"},
-                "device": {"type": "string", "description": "SDR device: 'hackrf' (default) or 'rtlsdr:N' for RTL-SDR device index N"},
+                "device":       {"type": "string",  "description": "SDR to use: 'auto' (default), 'hackrf', 'rtlsdr', 'rtlsdr:N'"},
             },
             "required": [],
         },
         "fn": _rtlais_start,
     },
     "dumphfdl_start": {
-        "description": "Decode HFDL aircraft datalink messages on HF shortwave frequencies — covers polar routes and remote areas. Needs exclusive HackRF access and a good HF antenna.",
+        "description": (
+            "Decode HFDL aircraft datalink on HF shortwave (2-17 MHz) — covers polar routes and remote areas. "
+            "HackRF only: RTL-SDR cannot receive below 24 MHz. "
+            "Auto-detects HackRF; returns a clear error if only RTL-SDR is present."
+        ),
         "schema": {
             "type": "object",
             "properties": {
                 "freq_list":    {"type": "array", "items": {"type": "integer"}, "description": "HF frequencies in kHz (default: [8825, 11384, 13270])"},
                 "duration_sec": {"type": "integer", "description": "Scan duration in seconds (default 60)"},
+                "device":       {"type": "string",  "description": "SDR to use: 'auto' (default) or 'hackrf'"},
             },
             "required": [],
         },
         "fn": _dumphfdl_start,
     },
     "dumpvdl2_start": {
-        "description": "Decode VDL Mode 2 aircraft datalink on 136-137 MHz — ACARS over VHF digital radio, very active near airports. Needs exclusive HackRF access, or use device='rtlsdr:N' for RTL-SDR.",
+        "description": (
+            "Decode VDL Mode 2 aircraft datalink on 136-137 MHz — ACARS over VHF digital radio, very active near airports. "
+            "Auto-detects connected SDR (HackRF or RTL-SDR); single radio used automatically, "
+            "multiple returns a choice list."
+        ),
         "schema": {
             "type": "object",
             "properties": {
                 "duration_sec": {"type": "integer", "description": "Scan duration in seconds (default 60)"},
-                "device": {"type": "string", "description": "SDR device: 'hackrf' (default) or 'rtlsdr:N' for RTL-SDR device index N"},
+                "device":       {"type": "string",  "description": "SDR to use: 'auto' (default), 'hackrf', 'rtlsdr', 'rtlsdr:N'"},
             },
             "required": [],
         },
@@ -810,13 +825,17 @@ TOOL_REGISTRY: dict[str, dict] = {
         "fn": _gpredict_stop,
     },
     "rtl433_start": {
-        "description": "Decode 433/868/315 MHz ISM band sensors automatically — weather stations, tire pressure, doorbells, power meters etc. Needs exclusive HackRF access, or use device='rtlsdr:N' for RTL-SDR.",
+        "description": (
+            "Decode 433/868/315 MHz ISM band sensors — weather stations, tire pressure, doorbells, power meters etc. "
+            "Auto-detects connected SDR (HackRF or RTL-SDR); single radio used automatically, "
+            "multiple returns a choice list."
+        ),
         "schema": {
             "type": "object",
             "properties": {
-                "freq_mhz":     {"type": "number",  "description": "Center frequency in MHz (default 433.92 for EU, try 315.0 for US)"},
+                "freq_mhz":     {"type": "number",  "description": "Center frequency in MHz (default 433.92 for EU, try 315.0 for US, 868.35 for EU meters)"},
                 "duration_sec": {"type": "integer", "description": "Scan duration in seconds (default 30)"},
-                "device": {"type": "string", "description": "SDR device: 'hackrf' (default) or 'rtlsdr:N' for RTL-SDR device index N"},
+                "device":       {"type": "string",  "description": "SDR to use: 'auto' (default), 'hackrf', 'rtlsdr', 'rtlsdr:N'"},
             },
             "required": [],
         },
@@ -1125,12 +1144,17 @@ TOOL_REGISTRY: dict[str, dict] = {
         "fn": _adsb_scan,
     },
     "gsm_scan": {
-        "description": "Scan for GSM base stations using grgsm_scanner. Returns active ARFCNs and cell IDs.",
+        "description": (
+            "Scan for GSM base stations using grgsm_scanner (RTL-SDR only — grgsm uses the rtlsdr driver). "
+            "Auto-detects RTL-SDR; returns a clear error if only HackRF is present. "
+            "Returns active ARFCNs and cell IDs. Use device='rtlsdr:N' when multiple dongles are connected."
+        ),
         "schema": {
             "type": "object",
             "properties": {
-                "band": {"type": "string", "enum": ["GSM850", "GSM900", "DCS1800", "PCS1900"],
-                         "description": "GSM band to scan (default GSM850 for US)"},
+                "band":   {"type": "string", "enum": ["GSM850", "GSM900", "DCS1800", "PCS1900"],
+                           "description": "GSM band to scan (default GSM850 for US, GSM900 for EU)"},
+                "device": {"type": "string", "description": "RTL-SDR to use: 'auto' (default) or 'rtlsdr:N' for device index N"},
             },
             "required": [],
         },

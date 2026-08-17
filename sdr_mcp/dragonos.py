@@ -501,7 +501,15 @@ def adsb_scan(duration_sec: int = 30, device: str = "auto") -> str:
     return json.dumps({"status": "error", "message": f"Unknown device '{device}'. Use 'auto', 'rtlsdr', 'rtlsdr:N', or 'hackrf'."}, indent=2)
 
 
-def gsm_scan(band: str = "GSM850") -> str:
+def gsm_scan(band: str = "GSM850", device: str = "auto") -> str:
+    """
+    Scan for GSM base stations using grgsm_scanner (gr-gsm).
+    RTL-SDR only: grgsm_scanner uses the rtlsdr osmosdr source.
+    HackRF cannot be used for this tool.
+
+    device="auto"      — detect RTL-SDR automatically; error if none found.
+    device="rtlsdr:N"  — use RTL-SDR device index N when multiple dongles present.
+    """
     scanner = shutil.which("grgsm_scanner")
     if not scanner:
         return json.dumps({
@@ -510,9 +518,44 @@ def gsm_scan(band: str = "GSM850") -> str:
             "install": "sudo apt install gr-gsm",
         }, indent=2)
 
-    rc, out, err = _run([scanner, "-b", band], timeout=90)
+    # Detect radio
+    if device == "auto":
+        radios = detect_radios()
+        rtlsdrs = [r for r in radios if r["type"] == "rtlsdr"]
+        hackrfs  = [r for r in radios if r["type"] == "hackrf"]
 
-    # Parse ARFCN output
+        if not radios:
+            return json.dumps({"status": "no_radio",
+                "message": "No SDR device detected."}, indent=2)
+
+        if not rtlsdrs:
+            return json.dumps({
+                "status": "no_compatible_radio",
+                "message": (
+                    "gsm_scan requires an RTL-SDR dongle (grgsm_scanner uses the rtlsdr driver). "
+                    + ("A HackRF is connected but cannot be used for this tool." if hackrfs else "")
+                ),
+            }, indent=2)
+
+        if len(rtlsdrs) > 1:
+            return json.dumps({
+                "status": "multiple_radios",
+                "message": "Multiple RTL-SDR devices found. Re-call with device='rtlsdr:N'.",
+                "devices": [{"id": f"rtlsdr:{r.get('index', 0)}",
+                              "description": r["description"]} for r in rtlsdrs],
+            }, indent=2)
+
+        dev_idx = rtlsdrs[0].get("index", 0)
+        print(f"\n  [auto] Using {rtlsdrs[0]['description']}", flush=True)
+    else:
+        parts = device.split(":", 1)
+        dev_idx = int(parts[1]) if len(parts) > 1 else 0
+
+    # grgsm_scanner uses osmosdr args via -a; rtlsdr=N selects device index
+    args_str = f"rtlsdr={dev_idx}"
+    cmd = [scanner, "-b", band, "-a", args_str]
+    rc, out, err = _run(cmd, timeout=90)
+
     arfcns = []
     for line in out.splitlines():
         if "ARFCN" in line or "MHz" in line:
@@ -521,6 +564,7 @@ def gsm_scan(band: str = "GSM850") -> str:
     return json.dumps({
         "status": "complete",
         "band": band,
+        "device": f"rtlsdr:{dev_idx}",
         "arfcns_found": len(arfcns),
         "output": arfcns or out.strip().splitlines()[:20],
         "note": "Use grgsm_livemon_headless --freq=<Hz> --gain=40 to monitor a found channel",
