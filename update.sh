@@ -116,3 +116,10 @@ echo ""
 echo "  dragon-agent will use the new code on next start."
 echo "  To start now: dragon-agent"
 echo ""
+
+# ── Remind about optional system dependencies ──────────────────────────────
+if ! command -v meshtastic-sniffer &>/dev/null; then
+    echo -e "\033[1;33m⚠\033[0m  meshtastic-sniffer not found — Meshtastic listening will report tool_not_found."
+    echo "   Install it once with:  bash install-meshtastic-sniffer.sh"
+    echo ""
+fi

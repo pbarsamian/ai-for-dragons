@@ -160,6 +160,28 @@ else
     warn "hackrf_info not found — try: sudo apt install hackrf"
 fi
 
+# ── meshtastic-sniffer ───────────────────────────────────────────────────
+hdr "meshtastic-sniffer:"
+if command -v meshtastic-sniffer &>/dev/null; then
+    ok "Installed: $(command -v meshtastic-sniffer)"
+else
+    # Check known build locations
+    SNIFF_BIN=""
+    for p in \
+        "$HOME/meshtastic-sniffer/build/meshtastic-sniffer" \
+        "/usr/local/bin/meshtastic-sniffer"; do
+        if [ -x "$p" ]; then SNIFF_BIN="$p"; break; fi
+    done
+
+    if [ -n "$SNIFF_BIN" ]; then
+        warn "Binary exists at $SNIFF_BIN but not on PATH"
+        echo "       Fix: sudo cp $SNIFF_BIN /usr/local/bin/meshtastic-sniffer"
+    else
+        warn "Not installed — meshtastic_sniff tool will return tool_not_found"
+        echo "       Fix: bash install-meshtastic-sniffer.sh"
+    fi
+fi
+
 echo ""
 echo "══════════════════════════════════════════════════════"
 echo ""
