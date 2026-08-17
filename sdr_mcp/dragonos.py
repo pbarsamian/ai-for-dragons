@@ -109,39 +109,53 @@ def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 60) -> str:
         }, indent=2)
 
     freq_hz = int(freq_mhz * 1e6)
+    # Correct flags per alphafox02/meshtastic-sniffer options.c:
+    #   --hackrf          selects HackRF backend (no value)
+    #   --center=<hz>     center frequency in Hz
+    #   --rate=<sps>      sample rate (2 MSPS covers single-channel LongFast)
+    #   --keys=default    decrypt with built-in default keys
+    # JSON packets stream to stdout automatically; stats heartbeat goes to stderr.
+    # No --timeout flag exists — we terminate the process ourselves.
     cmd = [sniffer,
-           "--driver", "hackrf",
-           "--freq", str(freq_hz),
-           "--rate", "2000000",
-           "--json",
-           "--timeout", str(duration_sec)]
+           "--hackrf",
+           f"--center={freq_hz}",
+           "--rate=2000000",
+           "--keys=default"]
 
     start = time.time()
     packets = []
+    done = False
 
     import select
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        while time.time() - start < duration_sec:
-            ready, _, _ = select.select([proc.stdout], [], [], 5.0)
+        while not done and time.time() - start < duration_sec:
+            ready, _, _ = select.select([proc.stdout, proc.stderr], [], [], 5.0)
             if not ready:
                 if proc.poll() is not None:
                     break
                 continue
-            line = proc.stdout.readline()
-            if not line:
-                break
-            line = line.strip()
-            if line.startswith("{"):
-                try:
-                    pkt = json.loads(line)
-                    packets.append(pkt)
+            for fd in ready:
+                line = fd.readline()
+                if not line:
+                    if proc.poll() is not None:
+                        done = True
+                    continue
+                line = line.strip()
+                if fd is proc.stdout and line.startswith("{"):
+                    try:
+                        pkt = json.loads(line)
+                        packets.append(pkt)
+                        elapsed = int(time.time() - start)
+                        print(f"\n  [meshtastic +{elapsed}s] {json.dumps(pkt, separators=(',', ':'))[:160]}",
+                              flush=True)
+                    except json.JSONDecodeError:
+                        pass
+                elif fd is proc.stderr and line:
+                    # Stats heartbeat every 5s — shows HackRF is live and decoding
                     elapsed = int(time.time() - start)
-                    print(f"\n  [meshtastic +{elapsed}s] {json.dumps(pkt, separators=(',', ':'))[:160]}",
-                          flush=True)
-                except json.JSONDecodeError:
-                    pass
+                    print(f"\n  [+{elapsed}s] {line}", flush=True)
     finally:
         proc.terminate()
         try:
