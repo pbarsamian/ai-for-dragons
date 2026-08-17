@@ -172,6 +172,36 @@ def _show_result(result: str, max_items: int = 8) -> None:
         print(f"   ... ({len(data) - max_items} more fields)")
 
 
+def _stream_chat(client, *, model: str, messages: list, tools: list | None = None,
+                 label: str = "Thinking", opts: dict) -> tuple:
+    """
+    Stream a chat response, printing content tokens as they arrive.
+    Returns (content_str, final_message_obj).
+    Prints "label..." while waiting for the first token, then switches to
+    "Assistant: <tokens>" once content starts flowing. For tool-call-only
+    responses (no content), just prints a newline after the label line.
+    """
+    print(f"\n{label}...", end="", flush=True)
+    content_buf = ""
+    final_msg = None
+    kwargs = dict(model=model, messages=messages, stream=True, think=False, options=opts)
+    if tools is not None:
+        kwargs["tools"] = tools
+
+    for chunk in client.chat(**kwargs):
+        c = chunk.message.content or ""
+        if c:
+            if not content_buf:
+                # First content token: move past the "label..." line
+                print(f"\nAssistant: ", end="", flush=True)
+            print(c, end="", flush=True)
+            content_buf += c
+        final_msg = chunk.message
+
+    print()  # newline — either after streamed text, or after the "label..." line
+    return content_buf, final_msg
+
+
 def chat_loop(model: str, all_tools: bool = False) -> None:
     try:
         import ollama
@@ -189,6 +219,9 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
     client  = ollama.Client(timeout=httpx.Timeout(connect=10, read=None, write=30, pool=10))
     tools   = build_ollama_tools(all_tools)
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
+    # num_ctx caps the KV-cache size — halving it from the model default
+    # meaningfully reduces per-token computation on Pi 5 CPU.
+    opts = {"num_predict": 512, "num_ctx": 4096}
 
     tool_count = len(tools)
     print(f"\n[dragon-agent] Model: {model}  |  Tools: {tool_count}  |  Type 'quit' to exit\n")
@@ -209,92 +242,53 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
 
         # Agentic loop: model may call tools multiple times
         for round_num in range(8):
-            stop = threading.Event()
-            spin_msg = "Thinking" if round_num == 0 else "Analyzing results"
-            spin = threading.Thread(target=spinner, args=(stop, spin_msg), daemon=True)
-            spin.start()
-
+            label = "Thinking" if round_num == 0 else "Analyzing results"
             try:
-                response = client.chat(
-                    model=model,
-                    messages=history,
-                    tools=tools,
-                    think=False,
-                    options={"num_predict": 512},
+                content, msg = _stream_chat(
+                    client, model=model, messages=history,
+                    tools=tools, label=label, opts=opts,
                 )
-                stop.set()
-                spin.join()
             except KeyboardInterrupt:
-                stop.set()
-                spin.join()
                 print("\n[interrupted]")
                 break
             except Exception as e:
-                stop.set()
-                spin.join()
                 print(f"\n[dragon-agent] Ollama error: {e}")
                 print("[dragon-agent] Is Ollama still running? Check: sudo systemctl status ollama")
                 break
 
-            msg = response.message
+            if msg is None:
+                break
+
             history.append({
                 "role": "assistant",
-                "content": msg.content or "",
+                "content": content,
                 "tool_calls": [tc.model_dump() for tc in (msg.tool_calls or [])],
             })
 
-            # Always show the model's reasoning/content immediately so the user
-            # can see what it decided before any long-running tool executes.
-            model_text = (msg.content or "").strip()
-            if model_text:
-                label = "Reasoning" if msg.tool_calls else "Assistant"
-                print(f"\n{label}: {model_text}")
-
             if not msg.tool_calls:
-                content = (msg.content or "").strip()
-
                 # Round 0 produced text but no tool call — nudge once.
                 # Short content (< 200 chars) that ends without terminal punctuation
                 # is almost certainly a preamble ("I'll listen...", "Let me...").
-                # We pop it, inject a forcing message, and let the loop continue.
                 if content and round_num == 0 and len(content) < 200 and not content.endswith((".", "?", "!")):
                     history.pop()
                     history.append({"role": "assistant", "content": content, "tool_calls": []})
                     history.append({"role": "user", "content": "Call the tool now."})
-                    print(f"\n[nudging — calling tool...]\n")
+                    print("[nudging — calling tool...]")
                     continue
 
                 # Empty response on round 0 — retry without tools to get a text answer.
                 if not content and round_num == 0:
                     history.pop()
-                    stop_r = threading.Event()
-                    spin_r = threading.Thread(
-                        target=spinner, args=(stop_r, "Thinking"), daemon=True
-                    )
-                    spin_r.start()
                     try:
-                        r2 = client.chat(
-                            model=model,
-                            messages=history,
-                            think=False,
-                            options={"num_predict": 512},
+                        content, msg2 = _stream_chat(
+                            client, model=model, messages=history,
+                            tools=None, label="Thinking", opts=opts,
                         )
-                        content = (r2.message.content or "").strip()
-                        history.append({
-                            "role": "assistant",
-                            "content": content,
-                            "tool_calls": [],
-                        })
+                        history.append({"role": "assistant", "content": content, "tool_calls": []})
                     except Exception:
                         pass
-                    finally:
-                        stop_r.set()
-                        spin_r.join()
-                    # Print the retry content (initial was empty so model_text didn't show it)
-                    if content:
-                        print(f"\nAssistant: {content}")
 
-                if not content and not model_text:
+                if not content:
                     print("\nAssistant: [no response — try rephrasing]")
                 print()
                 break
@@ -359,6 +353,7 @@ def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int, 
     import httpx
     client = ollama.Client(timeout=httpx.Timeout(connect=10, read=None, write=30, pool=10))
     tools  = build_ollama_tools(all_tools)
+    opts   = {"num_predict": 512, "num_ctx": 4096}
 
     print(f"[dragon-agent] Watch mode: {freq_min}-{freq_max} MHz every {interval_sec}s")
     print("[dragon-agent] Press Ctrl+C to stop\n")
@@ -377,7 +372,7 @@ def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int, 
             ]
 
             for _ in range(4):
-                response = client.chat(model=model, messages=history, tools=tools, think=False, options={"num_predict": 512})
+                response = client.chat(model=model, messages=history, tools=tools, think=False, options=opts)
                 msg = response.message
                 history.append({
                     "role": "assistant",
@@ -415,8 +410,8 @@ def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int, 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="dragon-agent — Offline SDR AI assistant")
-    parser.add_argument("--model", default="qwen2.5:7b",
-                        help="Ollama model name (default: qwen2.5:7b)")
+    parser.add_argument("--model", default="qwen2.5:3b",
+                        help="Ollama model name (default: qwen2.5:3b — fast on Pi 5; try qwen3:1.7b for even faster)")
     parser.add_argument("--watch", nargs=2, type=float, metavar=("FREQ_MIN", "FREQ_MAX"),
                         help="Watch mode: continuously monitor FREQ_MIN-FREQ_MAX MHz")
     parser.add_argument("--interval", type=int, default=60,
