@@ -1210,6 +1210,7 @@ def dumphfdl_start(
                         "RTL-SDR only receives 24 MHz and above — it cannot tune to HF without an upconverter. "
                         "A HackRF One is required for HFDL decoding."
                     ),
+                    "try_instead": None,
                 }, indent=2)
         except Exception:
             pass

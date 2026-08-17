@@ -28,6 +28,10 @@ When to use tools vs text:
 - User asks about results already shown → text only
 - User asks a general RF question → text only
 
+Hardware fallback rule — when a tool result contains "try_instead":
+- If try_instead has a "tool" key with a non-null value → call that tool immediately
+- If try_instead is null or tool is null → tell the user which hardware is needed and why
+
 Key tools:
   hackrf_sweep(freq_min, freq_max)           wideband spectrum survey
   hackrf_capture / analyze / replay          IQ file operations

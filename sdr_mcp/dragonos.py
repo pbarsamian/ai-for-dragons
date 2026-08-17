@@ -535,6 +535,15 @@ def gsm_scan(band: str = "GSM850", device: str = "auto") -> str:
                     "gsm_scan requires an RTL-SDR dongle (grgsm_scanner uses the rtlsdr driver). "
                     + ("A HackRF is connected but cannot be used for this tool." if hackrfs else "")
                 ),
+                "try_instead": {
+                    "tool": "hackrf_sweep",
+                    "args": {"freq_min_mhz": 869, "freq_max_mhz": 960},
+                    "reason": (
+                        "HackRF can show signal presence in the GSM850 band (869-960 MHz) "
+                        "but cannot decode GSM — use this to confirm whether base stations are active, "
+                        "then attach an RTL-SDR to run gsm_scan for full ARFCN decoding."
+                    ),
+                } if hackrfs else None,
             }, indent=2)
 
         if len(rtlsdrs) > 1:

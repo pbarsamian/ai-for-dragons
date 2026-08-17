@@ -97,6 +97,22 @@ def hackrf_sweep(
 ) -> str:
     busy = _check_hackrf_free()
     if busy:
+        if any(kw in busy.lower() for kw in ("not detected", "not found")):
+            rtlsdr_max = 1766
+            if freq_max_mhz <= rtlsdr_max:
+                alt = {"tool": "rtlsdr_power",
+                       "args": {"freq_min_mhz": freq_min_mhz, "freq_max_mhz": freq_max_mhz},
+                       "reason": f"RTL-SDR covers up to {rtlsdr_max} MHz and can sweep this range"}
+            else:
+                alt = None
+            return json.dumps({
+                "status": "no_hackrf",
+                "message": busy,
+                "try_instead": alt or {
+                    "tool": None,
+                    "reason": f"Requested range includes frequencies above {rtlsdr_max} MHz — HackRF required",
+                },
+            }, indent=2)
         return busy
 
     freq_range = f"{int(freq_min_mhz)}:{int(freq_max_mhz)}"
@@ -189,6 +205,24 @@ def hackrf_capture(
 ) -> str:
     busy = _check_hackrf_free()
     if busy:
+        if any(kw in busy.lower() for kw in ("not detected", "not found")):
+            rtlsdr_max = 1766
+            alt: dict | None = None
+            if freq_mhz <= rtlsdr_max:
+                alt = {
+                    "tool": "rtlsdr_capture",
+                    "args": {"freq_mhz": freq_mhz, "duration_sec": int(duration_sec),
+                             "sample_rate_msps": min(sample_rate_msps, 2.048)},
+                    "reason": f"RTL-SDR covers up to {rtlsdr_max} MHz and can capture at this frequency",
+                }
+            return json.dumps({
+                "status": "no_hackrf",
+                "message": busy,
+                "try_instead": alt or {
+                    "tool": None,
+                    "reason": f"{freq_mhz} MHz is above RTL-SDR's 1766 MHz limit — HackRF required",
+                },
+            }, indent=2)
         return busy
 
     os.makedirs(CAPTURE_DIR, exist_ok=True)
