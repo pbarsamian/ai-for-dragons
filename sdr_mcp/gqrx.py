@@ -124,13 +124,46 @@ def gqrx_stop() -> str:
     return "GQRX stopped — HackRF is now free. Run your sweep or capture, then call gqrx_start when done."
 
 
+def _patch_gqrx_remote_control() -> None:
+    """
+    Write remote control settings to GQRX's config before launch so port 7356
+    is open automatically without requiring manual menu interaction.
+    Creates the config directory and file if they don't exist yet.
+    """
+    import configparser
+
+    config_dir  = os.path.expanduser("~/.config/GQRX")
+    config_path = os.path.join(config_dir, "default.conf")
+
+    os.makedirs(config_dir, exist_ok=True)
+
+    cfg = configparser.ConfigParser(strict=False)
+    if os.path.exists(config_path):
+        cfg.read(config_path)
+
+    if not cfg.has_section("remote_control"):
+        cfg.add_section("remote_control")
+    cfg.set("remote_control", "enabled", "true")
+    cfg.set("remote_control", "port",    "7356")
+
+    try:
+        with open(config_path, "w") as f:
+            cfg.write(f)
+    except OSError:
+        pass  # read-only filesystem — GQRX may still open the port from saved state
+
+
 def gqrx_start() -> str:
     """
     Start GQRX (headless service) after a sweep/capture is complete.
-    Waits for remote control port 7356 to be ready before returning.
+    Pre-patches the GQRX config so remote control port 7356 opens automatically.
+    Waits up to 30 seconds for the port before returning.
     """
     import socket
     import time
+
+    # Enable remote control in config before launch so it's automatic
+    _patch_gqrx_remote_control()
 
     # Start the headless service
     r = subprocess.run(
@@ -147,8 +180,8 @@ def gqrx_start() -> str:
             env=env,
         )
 
-    # Wait up to 20 seconds for remote control port to open
-    for i in range(10):
+    # Wait up to 30 seconds for remote control port to open
+    for _ in range(15):
         time.sleep(2)
         try:
             with socket.create_connection(("127.0.0.1", 7356), timeout=2):
@@ -157,6 +190,6 @@ def gqrx_start() -> str:
             continue
 
     return (
-        "GQRX started but remote control port 7356 not yet open. "
-        "In GQRX: Tools → Remote control → Start, then retry."
+        "GQRX is running but remote control port 7356 did not open in 30 s. "
+        "Open GQRX, go to Tools → Remote control → Start, then call gqrx_tune."
     )

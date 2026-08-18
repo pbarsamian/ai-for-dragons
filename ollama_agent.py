@@ -257,7 +257,7 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
             if not msg.tool_calls:
                 content = (msg.content or "").strip()
 
-                # Round 0 produced text but no tool call — nudge once.
+                # Round 0: preamble text with no tool call — nudge once.
                 # Short content (< 200 chars) that ends without terminal punctuation
                 # is almost certainly a preamble ("I'll listen...", "Let me...").
                 if content and round_num == 0 and len(content) < 200 and not content.endswith((".", "?", "!")):
@@ -267,7 +267,7 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                     print("\n[nudging — calling tool...]\n")
                     continue
 
-                # Empty response on round 0 — retry without tools to get a text answer.
+                # Round 0: completely empty — retry without tools to get a text answer.
                 if not content and round_num == 0:
                     history.pop()
                     stop_r = threading.Event()
@@ -284,6 +284,14 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                         spin_r.join()
                     if content:
                         print(f"\nAssistant: {content}")
+
+                # Mid-task: tool returned a result but model stalled (no tool call,
+                # no meaningful text).  Nudge it to continue the task.
+                elif not content and round_num > 0 and round_num < 6:
+                    history.pop()
+                    history.append({"role": "user", "content": "Continue — call the next tool needed."})
+                    print("\n[nudging — continue task...]\n")
+                    continue
 
                 if not content and not model_text:
                     print("\nAssistant: [no response — try rephrasing]")
