@@ -6,6 +6,7 @@ To enable in GQRX: Tools → Remote control → Start
 Test manually:  echo "f" | nc -w2 localhost 7356
 """
 
+import re
 import socket
 import time
 
@@ -126,29 +127,32 @@ def gqrx_stop() -> str:
 
 def _patch_gqrx_remote_control() -> None:
     """
-    Write remote control settings to GQRX's config before launch so port 7356
-    is open automatically without requiring manual menu interaction.
-    Creates the config directory and file if they don't exist yet.
+    Ensure GQRX config has remote_control/enabled=true before launch so port 7356
+    opens automatically.  Uses raw text manipulation to avoid corrupting Qt INI
+    list entries (e.g. bookmarks\\1\\frequency=...) that configparser can't round-trip.
     """
-    import configparser
-
     config_dir  = os.path.expanduser("~/.config/GQRX")
     config_path = os.path.join(config_dir, "default.conf")
-
     os.makedirs(config_dir, exist_ok=True)
 
-    cfg = configparser.ConfigParser(strict=False)
     if os.path.exists(config_path):
-        cfg.read(config_path)
+        with open(config_path) as f:
+            text = f.read()
+        # Remove any existing [remote_control] section so we can append a clean one
+        text = re.sub(
+            r'\[remote_control\].*?(?=\n\[|\Z)',
+            '',
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        ).rstrip()
+    else:
+        text = ""
 
-    if not cfg.has_section("remote_control"):
-        cfg.add_section("remote_control")
-    cfg.set("remote_control", "enabled", "true")
-    cfg.set("remote_control", "port",    "7356")
+    text += "\n\n[remote_control]\nenabled=true\nport=7356\n"
 
     try:
         with open(config_path, "w") as f:
-            cfg.write(f)
+            f.write(text)
     except OSError:
         pass  # read-only filesystem — GQRX may still open the port from saved state
 
