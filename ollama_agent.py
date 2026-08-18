@@ -48,6 +48,13 @@ Key tools:
 HackRF exclusivity: only one process at a time.
 Call gqrx_stop before: hackrf_sweep, hackrf_capture, hackrf_replay,
   meshtastic_sniff, adsb_scan, gsm_scan, rtl433_start, rtlais_start, dumpvdl2_start.
+
+Sweep-then-tune workflow (use this exact sequence, no extra steps):
+1. hackrf_sweep → top_signals list is sorted strongest-first; first item = strongest signal
+2. gqrx_start   → starts GQRX receiver with remote control ready
+3. gqrx_tune(frequency_mhz=<freq from step 1>) → done
+Never call identify_frequency as an intermediate step in this workflow.
+Never call the same tool twice with the same arguments.
 """
 
 # Core tools sent by default — keeps input tokens small for fast Pi 5 response.
@@ -214,6 +221,7 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
         history.append({"role": "user", "content": user_input})
 
         # Agentic loop: model may call tools multiple times
+        recent_call_sigs: list[str] = []  # track (tool, args) to detect stuck loops
         for round_num in range(8):
             stop = threading.Event()
             spin_msg = "Thinking" if round_num == 0 else "Analyzing results"
@@ -340,6 +348,19 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                     "content": result,
                     "name": tool_name,
                 })
+
+                # Detect repeated identical calls — break the loop before it spirals
+                sig = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
+                if sig in recent_call_sigs:
+                    history.append({
+                        "role": "user",
+                        "content": (
+                            f"You already called {tool_name} with those exact arguments. "
+                            "Do NOT call it again. Move to the next required step."
+                        ),
+                    })
+                    print(f"\n[loop-break: {tool_name} repeated — redirecting]\n")
+                recent_call_sigs.append(sig)
 
 
 def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int, all_tools: bool = False) -> None:
