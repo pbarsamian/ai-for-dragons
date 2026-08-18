@@ -153,46 +153,90 @@ def _patch_gqrx_remote_control() -> None:
         pass  # read-only filesystem — GQRX may still open the port from saved state
 
 
+def _find_display() -> str:
+    """
+    Return the best available X display for launching GQRX.
+    Probes X11 sockets directly so it works from SSH sessions where
+    $DISPLAY is not set.  Starts Xvfb :99 as a last resort.
+    """
+    import glob
+
+    # Prefer the caller's session display if valid
+    env_disp = os.environ.get("DISPLAY", "")
+    if env_disp:
+        sock_num = env_disp.lstrip(":").split(".")[0]
+        if os.path.exists(f"/tmp/.X11-unix/X{sock_num}"):
+            return env_disp
+
+    # Probe for any live X server by checking socket files
+    for sock in sorted(glob.glob("/tmp/.X11-unix/X*")):
+        n = sock.rsplit("X", 1)[-1]
+        if n.isdigit():
+            return f":{n}"
+
+    # Last resort: start Xvfb on :99 (headless virtual display)
+    try:
+        subprocess.Popen(
+            ["Xvfb", ":99", "-screen", "0", "1280x1024x24"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        time.sleep(2)
+    except FileNotFoundError:
+        pass  # Xvfb not installed — GQRX may still work if display appears later
+    return ":99"
+
+
 def gqrx_start() -> str:
     """
-    Start GQRX (headless service) after a sweep/capture is complete.
+    Start GQRX after a sweep/capture is complete.
     Pre-patches the GQRX config so remote control port 7356 opens automatically.
-    Waits up to 30 seconds for the port before returning.
+    Probes X11 sockets to find a running display even from SSH sessions.
     """
     import socket
-    import time
 
-    # Enable remote control in config before launch so it's automatic
-    _patch_gqrx_remote_control()
-
-    # Start the headless service
-    r = subprocess.run(
-        ["systemctl", "--user", "start", "sdr-gqrx-headless"],
-        capture_output=True, text=True, timeout=10
-    )
-    if r.returncode != 0:
-        # Service may not be installed — launch GQRX directly.
-        # Prefer the session's real display (VNC / HDMI) so the window appears;
-        # fall back to :99 (Xvfb) only if no display is set.
-        display = os.environ.get("DISPLAY") or ":99"
-        env = {**os.environ, "DISPLAY": display}
-        subprocess.Popen(
-            ["gqrx"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env=env,
-        )
-
-    # Wait up to 30 seconds for remote control port to open
-    for _ in range(15):
-        time.sleep(2)
+    def _port_open() -> bool:
         try:
             with socket.create_connection(("127.0.0.1", 7356), timeout=2):
-                return "GQRX started — remote control ready on port 7356."
+                return True
         except (ConnectionRefusedError, OSError):
-            continue
+            return False
+
+    # Early return if GQRX is already running with remote control active
+    if _port_open():
+        return "GQRX is already running — remote control ready on port 7356."
+
+    # Ensure remote control is pre-configured before launch
+    _patch_gqrx_remote_control()
+
+    # Try the headless systemd service first (may have its own display configured)
+    r = subprocess.run(
+        ["systemctl", "--user", "start", "sdr-gqrx-headless"],
+        capture_output=True, text=True, timeout=10,
+    )
+    if r.returncode == 0:
+        for _ in range(8):
+            time.sleep(2)
+            if _port_open():
+                return "GQRX started — remote control ready on port 7356."
+
+    # Service unavailable or port didn't open — launch GQRX directly.
+    # Find the best available X display (works from SSH, VNC, or HDMI sessions).
+    display = _find_display()
+    env = {**os.environ, "DISPLAY": display}
+    subprocess.Popen(
+        ["gqrx"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=env,
+    )
+
+    # Wait up to 20 s for remote control port
+    for _ in range(10):
+        time.sleep(2)
+        if _port_open():
+            return f"GQRX started on display {display} — remote control ready on port 7356."
 
     return (
-        "GQRX is running but remote control port 7356 did not open in 30 s. "
-        "Open GQRX, go to Tools → Remote control → Start, then call gqrx_tune."
+        f"GQRX launched on display {display} but remote control port 7356 did not open in 20 s. "
+        "If the GQRX window is visible, go to Tools → Remote control → Start, then call gqrx_tune."
     )
