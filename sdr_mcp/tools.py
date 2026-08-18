@@ -54,6 +54,7 @@ from .protocol_interpreter import (
     identify_frequency,
 )
 from .dragonos import (
+    detect_radios,
     signal_identify,
     meshtastic_sniff,
     adsb_scan,
@@ -406,6 +407,15 @@ def _dump1090_stop(args: dict) -> str:   return dump1090_stop()
 
 def _app_status(args: dict) -> str:      return app_status()
 
+def _radio_status(args: dict) -> str:
+    radios = detect_radios()
+    if not radios:
+        return json.dumps({
+            "radios": [],
+            "message": "No SDR hardware detected. Check USB connections.",
+        }, indent=2)
+    return json.dumps({"radios": radios, "count": len(radios)}, indent=2)
+
 
 def _qspectrumanalyzer_start(args: dict) -> str: return qspectrumanalyzer_start()
 def _qspectrumanalyzer_stop(args: dict)  -> str: return qspectrumanalyzer_stop()
@@ -664,6 +674,11 @@ TOOL_REGISTRY: dict[str, dict] = {
         "description": "Show status of all DragonOS GUI apps (GQRX, SDRAngel, GNU Radio, inspectrum, URH, SatDump, dump1090) and which one currently holds the HackRF.",
         "schema": {"type": "object", "properties": {}, "required": []},
         "fn": _app_status,
+    },
+    "radio_status": {
+        "description": "Detect all connected SDR hardware (HackRF, RTL-SDR, Airspy). Use this when the user asks which radios are connected or available.",
+        "schema": {"type": "object", "properties": {}, "required": []},
+        "fn": _radio_status,
     },
 
     "qspectrumanalyzer_start": {

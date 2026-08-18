@@ -43,6 +43,7 @@ Key tools:
   interpret_adsb/ais/acars/pocsag/meshtastic decode captured frames
   explain_hex / signal_identify / identify_frequency  signal analysis
   gqrx_stop / gqrx_start / gqrx_tune / gqrx_status  GQRX receiver control
+  radio_status                               list all connected SDR hardware (HackRF, RTL-SDR, Airspy)
   app_status                                 check what's running and HackRF availability
 
 HackRF exclusivity: only one process at a time.
@@ -82,7 +83,7 @@ CORE_TOOL_NAMES = {
     # Signal analysis
     "signal_identify", "identify_frequency", "explain_hex",
     # App/system status and self-management
-    "app_status", "update_status", "self_update",
+    "app_status", "radio_status", "update_status", "self_update",
 }
 
 
