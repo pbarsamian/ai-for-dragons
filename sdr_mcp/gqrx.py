@@ -171,8 +171,11 @@ def gqrx_start() -> str:
         capture_output=True, text=True, timeout=10
     )
     if r.returncode != 0:
-        # Service may not be installed — try launching GQRX directly
-        env = {**os.environ, "DISPLAY": ":99"}
+        # Service may not be installed — launch GQRX directly.
+        # Prefer the session's real display (VNC / HDMI) so the window appears;
+        # fall back to :99 (Xvfb) only if no display is set.
+        display = os.environ.get("DISPLAY") or ":99"
+        env = {**os.environ, "DISPLAY": display}
         subprocess.Popen(
             ["gqrx"],
             stdout=subprocess.DEVNULL,
