@@ -5,6 +5,7 @@ Wraps: meshtastic-sniffer, dump1090, grgsm_scanner, GNU Radio
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -35,6 +36,64 @@ _DEVICE_FLAGS: dict[str, str] = {
 }
 
 
+# Known RTL-SDR USB vendor:product IDs
+_RTL_USB_IDS = {"0bda:2832", "0bda:2838", "0bda:2820", "0bda:2840", "1d19:1101"}
+
+
+def _detect_rtlsdr() -> list[dict]:
+    """
+    Detect RTL-SDR devices.
+    Method 1: rtl_test (gives device index + description)
+    Method 2: lsusb USB-ID match (fallback when rtl_test not installed)
+    """
+    # Method 1 — try both common binary names
+    rtl_bin = shutil.which("rtl_test") or shutil.which("rtl-test")
+    if rtl_bin:
+        _, out, err = _run([rtl_bin, "-t"], timeout=10)
+        devices: list[dict] = []
+        for line in (out + err).splitlines():
+            s = line.strip()
+            # rtl_test prints device list as "  0:  Realtek..." — after strip: "0:  Realtek..."
+            if s and s[0].isdigit() and ":" in s:
+                try:
+                    raw_idx, desc = s.split(":", 1)
+                    raw_idx = raw_idx.strip()
+                    if raw_idx.isdigit():
+                        devices.append({
+                            "type": "rtlsdr",
+                            "driver_flag": "--rtlsdr",
+                            "description": f"RTL-SDR #{raw_idx}: {desc.strip()}",
+                            "index": int(raw_idx),
+                        })
+                except (ValueError, IndexError):
+                    pass
+        if devices:
+            return devices
+
+    # Method 2 — lsusb: works even when rtl-sdr tools are not installed
+    if shutil.which("lsusb"):
+        _, out, _ = _run(["lsusb"], timeout=5)
+        devices = []
+        idx = 0
+        for line in out.splitlines():
+            lower = line.lower()
+            if any(uid in lower for uid in _RTL_USB_IDS) or "rtl283" in lower:
+                # Line format: "Bus NNN Device NNN: ID xxxx:xxxx Description"
+                m = re.search(r"\bID\s+[\da-f]+:[\da-f]+\s+(.+)", line, re.IGNORECASE)
+                desc = m.group(1).strip() if m else "RTL-SDR"
+                devices.append({
+                    "type": "rtlsdr",
+                    "driver_flag": "--rtlsdr",
+                    "description": f"RTL-SDR #{idx}: {desc}",
+                    "index": idx,
+                })
+                idx += 1
+        if devices:
+            return devices
+
+    return []
+
+
 def detect_radios() -> list[dict]:
     """
     Probe for connected SDR hardware.
@@ -57,22 +116,8 @@ def detect_radios() -> list[dict]:
                 "description": f"HackRF One (S/N {serial})",
             })
 
-    # RTL-SDR — rtl_test -t exits rc=1 even when devices exist; parse both streams
-    if shutil.which("rtl_test"):
-        _, out, err = _run(["rtl_test", "-t"], timeout=10)
-        for line in (out + err).splitlines():
-            s = line.strip()
-            if s and s[0].isdigit() and ":" in s:
-                try:
-                    idx, desc = s.split(":", 1)
-                    found.append({
-                        "type": "rtlsdr",
-                        "driver_flag": "--rtlsdr",
-                        "description": f"RTL-SDR #{idx.strip()}: {desc.strip()}",
-                        "index": int(idx.strip()),
-                    })
-                except (ValueError, IndexError):
-                    pass
+    # RTL-SDR — try rtl_test first, then lsusb as fallback
+    found.extend(_detect_rtlsdr())
 
     # Airspy — airspy_info exits 0 when a device is attached
     if shutil.which("airspy_info"):
