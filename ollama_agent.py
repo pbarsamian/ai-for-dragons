@@ -28,6 +28,10 @@ When to use tools vs text:
 - User asks about results already shown → text only
 - User asks a general RF question → text only
 
+Status and info tools — call ONCE then STOP and report to user in text:
+  radio_status, hackrf_info, rtlsdr_info, app_status, gqrx_status
+  Do NOT chain sweeps, scans, or any other tools after a status/info result.
+
 Hardware fallback rule — when a tool result contains "try_instead":
 - If try_instead has a "tool" key with a non-null value → call that tool immediately
 - If try_instead is null or tool is null → tell the user which hardware is needed and why
@@ -350,14 +354,17 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                     "name": tool_name,
                 })
 
-                # Detect repeated identical calls — break the loop before it spirals
+                # Detect repeated tool calls — break the loop before it spirals.
+                # Triggers when the same tool appears twice regardless of args,
+                # OR when exact (tool + args) appears twice.
                 sig = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
-                if sig in recent_call_sigs:
+                same_tool_count = sum(1 for s in recent_call_sigs if s.startswith(f"{tool_name}:"))
+                if sig in recent_call_sigs or same_tool_count >= 1:
                     history.append({
                         "role": "user",
                         "content": (
-                            f"You already called {tool_name} with those exact arguments. "
-                            "Do NOT call it again. Move to the next required step."
+                            f"You already called {tool_name}. "
+                            "Do NOT call it again. Either report the result to the user or call the NEXT different tool needed."
                         ),
                     })
                     print(f"\n[loop-break: {tool_name} repeated — redirecting]\n")
