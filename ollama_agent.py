@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-dragon-agent — Offline AI assistant using Ollama + ai-for-dragons tools.
+dragon-agent — Offline AI assistant using llama-server (llama.cpp) + ai-for-dragons tools.
 Works without Claude Code or internet after install.
 
 Usage:
   python3 ollama_agent.py
-  python3 ollama_agent.py --model qwen3:8b
+  python3 ollama_agent.py --model local
   python3 ollama_agent.py --watch 902 928 --interval 60
 """
 
@@ -90,47 +90,19 @@ CORE_TOOL_NAMES = {
     "app_status", "radio_status", "update_status", "self_update",
 }
 
+LLAMA_SERVER_URL = "http://localhost:8080"
 
-def check_ollama(model: str) -> bool:
-    """Verify Ollama is running and the model is available. Print clear errors if not."""
+
+def check_llama_server() -> bool:
+    """Verify llama-server is reachable."""
+    import httpx
     try:
-        import ollama
-        client = ollama.Client(timeout=10)
-        models = client.list()
-        available = [m.model for m in models.models]
-
-        # Ollama model names can vary: qwen3:1.7b might be listed as
-        # qwen3:1.7b, qwen3:1.7b-instruct-q4_K_M, etc.
-        # Match if the requested name is a prefix of any available model name.
-        def matches(requested: str, candidate: str) -> bool:
-            # Exact match
-            if requested == candidate:
-                return True
-            # requested is a prefix of candidate up to a dash or colon
-            # e.g. "qwen3:1.7b" matches "qwen3:1.7b-instruct-q4_K_M"
-            if candidate.startswith(requested):
-                return True
-            # Base name match (ignore tag entirely)
-            if requested.split(":")[0] == candidate.split(":")[0]:
-                return True
-            return False
-
-        if not any(matches(model, a) for a in available):
-            print(f"[dragon-agent] Model '{model}' not found in Ollama.")
-            print(f"[dragon-agent] Available: {', '.join(available) or 'none'}")
-            print(f"[dragon-agent] Download it: ollama pull {model}")
-            print(f"[dragon-agent] Then retry:  dragon-agent --model {model}")
-            return False
-
-        # Resolve to the actual stored name and return it
-        actual = next((a for a in available if matches(model, a)), model)
-        if actual != model:
-            print(f"[dragon-agent] Resolved '{model}' → '{actual}'")
-        return actual  # return resolved name, not just True
+        r = httpx.get(f"{LLAMA_SERVER_URL}/v1/models", timeout=5)
+        r.raise_for_status()
+        return True
     except Exception as e:
-        print(f"[dragon-agent] Cannot reach Ollama: {e}")
-        print("[dragon-agent] Try: sudo systemctl start ollama")
-        print("[dragon-agent] Or:  ollama serve &")
+        print(f"[dragon-agent] Cannot reach llama-server at {LLAMA_SERVER_URL}: {e}")
+        print("[dragon-agent] Start it first — see README for the startup command")
         return False
 
 
@@ -190,26 +162,21 @@ def _show_result(result: str, max_items: int = 8) -> None:
 
 def chat_loop(model: str, all_tools: bool = False) -> None:
     try:
-        import ollama
+        from openai import OpenAI
     except ImportError:
-        print("ERROR: ollama package not installed.")
-        print("Run: pip install ollama --break-system-packages")
+        print("ERROR: openai package not installed.")
+        print("Run: pip install openai --break-system-packages")
         sys.exit(1)
 
-    resolved = check_ollama(model)
-    if not resolved:
+    if not check_llama_server():
         sys.exit(1)
-    model = resolved  # use exact name Ollama knows
 
-    import httpx
-    client  = ollama.Client(timeout=httpx.Timeout(connect=10, read=None, write=30, pool=10))
+    client  = OpenAI(base_url=f"{LLAMA_SERVER_URL}/v1", api_key="no-key")
     tools   = build_ollama_tools(all_tools)
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
-    # num_ctx caps KV-cache — reduces per-token computation on Pi 5 CPU.
-    opts = {"num_predict": 512, "num_ctx": 4096}
 
     tool_count = len(tools)
-    print(f"\n[dragon-agent] Model: {model}  |  Tools: {tool_count}  |  Type 'quit' to exit\n")
+    print(f"\n[dragon-agent] Server: {LLAMA_SERVER_URL}  |  Tools: {tool_count}  |  Type 'quit' to exit\n")
 
     while True:
         try:
@@ -234,12 +201,11 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
             spin.start()
 
             try:
-                response = client.chat(
-                    model=model,
+                response = client.chat.completions.create(
+                    model="local",
                     messages=history,
                     tools=tools,
-                    think=False,
-                    options=opts,
+                    max_tokens=512,
                 )
                 stop.set()
                 spin.join()
@@ -251,16 +217,12 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
             except Exception as e:
                 stop.set()
                 spin.join()
-                print(f"\n[dragon-agent] Ollama error: {e}")
-                print("[dragon-agent] Is Ollama still running? Check: sudo systemctl status ollama")
+                print(f"\n[dragon-agent] llama-server error: {e}")
+                print("[dragon-agent] Is llama-server still running?")
                 break
 
-            msg = response.message
-            history.append({
-                "role": "assistant",
-                "content": msg.content or "",
-                "tool_calls": [tc.model_dump() for tc in (msg.tool_calls or [])],
-            })
+            msg = response.choices[0].message
+            history.append(msg)
 
             model_text = (msg.content or "").strip()
             if model_text:
@@ -275,7 +237,7 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                 # is almost certainly a preamble ("I'll listen...", "Let me...").
                 if content and round_num == 0 and len(content) < 200 and not content.endswith((".", "?", "!")):
                     history.pop()
-                    history.append({"role": "assistant", "content": content, "tool_calls": []})
+                    history.append({"role": "assistant", "content": content, "tool_calls": None})
                     history.append({"role": "user", "content": "Call the tool now."})
                     print("\n[nudging — calling tool...]\n")
                     continue
@@ -287,9 +249,9 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                     spin_r = threading.Thread(target=spinner, args=(stop_r, "Thinking"), daemon=True)
                     spin_r.start()
                     try:
-                        r2 = client.chat(model=model, messages=history, think=False, options=opts)
-                        content = (r2.message.content or "").strip()
-                        history.append({"role": "assistant", "content": content, "tool_calls": []})
+                        r2 = client.chat.completions.create(model="local", messages=history, max_tokens=512)
+                        content = (r2.choices[0].message.content or "").strip()
+                        history.append(r2.choices[0].message)
                     except Exception:
                         pass
                     finally:
@@ -351,7 +313,7 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                 history.append({
                     "role": "tool",
                     "content": result,
-                    "name": tool_name,
+                    "tool_call_id": tc.id,
                 })
 
                 # Detect repeated tool calls — break the loop before it spirals.
@@ -374,20 +336,17 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
 def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int, all_tools: bool = False) -> None:
     """Continuous band monitoring with LLM anomaly analysis."""
     try:
-        import ollama
+        from openai import OpenAI
     except ImportError:
-        print("ERROR: ollama package not installed.")
+        print("ERROR: openai package not installed.")
+        print("Run: pip install openai --break-system-packages")
         sys.exit(1)
 
-    resolved = check_ollama(model)
-    if not resolved:
+    if not check_llama_server():
         sys.exit(1)
-    model = resolved  # use exact name Ollama knows
 
-    import httpx
-    client = ollama.Client(timeout=httpx.Timeout(connect=10, read=None, write=30, pool=10))
+    client = OpenAI(base_url=f"{LLAMA_SERVER_URL}/v1", api_key="no-key")
     tools  = build_ollama_tools(all_tools)
-    opts   = {"num_predict": 512, "num_ctx": 4096}
 
     print(f"[dragon-agent] Watch mode: {freq_min}-{freq_max} MHz every {interval_sec}s")
     print("[dragon-agent] Press Ctrl+C to stop\n")
@@ -406,18 +365,19 @@ def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int, 
             ]
 
             for _ in range(4):
-                response = client.chat(model=model, messages=history, tools=tools, think=False, options=opts)
-                msg = response.message
-                history.append({
-                    "role": "assistant",
-                    "content": msg.content or "",
-                    "tool_calls": [tc.model_dump() for tc in (msg.tool_calls or [])],
-                })
+                response = client.chat.completions.create(
+                    model="local",
+                    messages=history,
+                    tools=tools,
+                    max_tokens=512,
+                )
+                msg = response.choices[0].message
+                history.append(msg)
 
                 if not msg.tool_calls:
                     ts = time.strftime("%H:%M:%S")
                     print(f"[{ts}] {msg.content}\n")
-                    baseline = msg.content[:200]
+                    baseline = (msg.content or "")[:200]
                     break
 
                 for tc in msg.tool_calls:
@@ -430,7 +390,11 @@ def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int, 
                             tool_args = {}
                     if tool_name in TOOL_REGISTRY:
                         result = execute_tool(tool_name, tool_args)
-                        history.append({"role": "tool", "content": result, "name": tool_name})
+                        history.append({
+                            "role": "tool",
+                            "content": result,
+                            "tool_call_id": tc.id,
+                        })
 
             time.sleep(interval_sec)
 
@@ -444,8 +408,8 @@ def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int, 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="dragon-agent — Offline SDR AI assistant")
-    parser.add_argument("--model", default="qwen2.5:3b",
-                        help="Ollama model name (default: qwen2.5:3b — fast on Pi 5; try qwen3:1.7b for even faster)")
+    parser.add_argument("--model", default="local",
+                        help="Model label for display (llama-server serves whichever model it was started with)")
     parser.add_argument("--watch", nargs=2, type=float, metavar=("FREQ_MIN", "FREQ_MAX"),
                         help="Watch mode: continuously monitor FREQ_MIN-FREQ_MAX MHz")
     parser.add_argument("--interval", type=int, default=60,
