@@ -1,12 +1,12 @@
 # ai-for-dragons — Claude Code context
 
 AI-powered SDR tool bridge for DragonOS Pi64 + HackRF One.
-Exposes 71 DragonOS tools to Claude Code and local Ollama via MCP (stdio transport).
+Exposes 71 DragonOS tools to Claude Code and a local LLM via MCP (stdio transport).
 
 ## Architecture
 
 ```
-Claude Code / Ollama
+Claude Code / dragon-agent (llama-server / llama.cpp)
       │
   sdr_mcp/server.py       MCP stdio server — JSON-RPC 2024-11-05
       │
@@ -23,6 +23,8 @@ Claude Code / Ollama
   DragonOS Pi64 (Raspberry Pi 5)
   GQRX, dump1090, GNU Radio, meshtastic-sniffer, etc.
 ```
+
+**LLM stack:** llama-server (llama.cpp) runs locally on the Pi on port 8080. It exposes an OpenAI-compatible `/v1/chat/completions` API. The agent (`ollama_agent.py`) uses the `openai` Python package to call it. Default model: Qwen2.5-1.5B-Instruct Q4_K_M.
 
 ## How to add a tool
 
@@ -63,7 +65,7 @@ def _tool_name(args: dict) -> str:
 | `protocol_interpreter.py` | interpret_adsb/ais/acars/pocsag/meshtastic, explain_hex, identify_frequency | None |
 | `tools.py` | Registry + wrappers only — no logic here | N/A |
 | `server.py` | MCP stdio loop — rarely needs changes | N/A |
-| `ollama_agent.py` | Offline AI agent — standalone script | N/A |
+| `ollama_agent.py` | Offline AI agent using llama-server (OpenAI-compatible API) | N/A |
 
 ## Hardware exclusivity (critical)
 
@@ -100,18 +102,28 @@ python test_tools.py        # smoke test, no hardware
 pytest tests/               # full suite
 ```
 
-**Pi 5 (DragonOS Pi64):**
-- Source lives in `~/sdr-mcp-pi5-bundle/sdr-mcp/`
-- Venv at `~/.local/share/ai-for-dragons/`
-- Commands: `dragon-agent`, `ai-for-dragons` (symlinked to /usr/local/bin)
-- Update: `git pull` then copy source files into venv site-packages
-
-**After any change to sdr_mcp/ on the Pi:**
+**Pi 5 (DragonOS Pi64) — first time:**
 ```bash
-PY_TAG=$(python3 -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')")
-SITE="$HOME/.local/share/ai-for-dragons/lib/$PY_TAG/site-packages"
-cp -r sdr_mcp "$SITE/" && cp ollama_agent.py "$SITE/"
+git clone https://github.com/pbarsamian/ai-for-dragons
+cd ai-for-dragons
+bash install.sh             # ~15 min: builds llama.cpp, downloads model, sets up service
+dragon-agent                # starts the agent
 ```
+
+**Pi 5 — after first install (updates):**
+```bash
+cd ai-for-dragons && bash update.sh
+```
+
+Key paths on Pi:
+- Source: wherever you cloned (e.g. `~/ai-for-dragons/`)
+- Venv: `~/.local/share/ai-for-dragons/`
+- llama-server binary: `<source>/llama.cpp/build/bin/llama-server`
+- Model: `<source>/llama.cpp/models/*.gguf`
+- Command wrapper: `/usr/local/bin/dragon-agent`
+- Systemd service: `/etc/systemd/system/llama-server.service`
+
+The venv uses an editable `.pth` install — `git pull` is all that's needed for code changes.
 
 ## Versioning and release
 
@@ -141,9 +153,9 @@ Categories:
 
 ## Key design decisions
 
-**Why direct file copy instead of pip install?**
+**Why direct .pth editable install instead of pip install -e?**
 DragonOS Pi64 ships old setuptools that don't support `setuptools.backends.legacy`.
-The installer copies source directly into the venv site-packages.
+Writing a `.pth` file directly into site-packages is equivalent and works on any Python.
 
 **Why Popen for hackrf_sweep instead of subprocess.run?**
 The `-n` flag (number of passes) is not available in all DragonOS hackrf versions.
@@ -154,7 +166,12 @@ GQRX sometimes writes duplicate keys in its config file, which Python's configpa
 rejects in strict mode (default). `strict=False` accepts duplicates, matching GQRX's
 own parser behavior.
 
-**Why fuzzy model name matching in check_ollama()?**
-Ollama stores models with full quantization suffixes (e.g. `qwen3:1.7b-instruct-q4_K_M`)
-but users specify short names (`qwen3:1.7b`). Prefix matching resolves the model name
-before passing it to client.chat().
+**Why llama-server instead of Ollama?**
+llama.cpp built from source with Cortex-A76 flags (ARM_DOTPROD, ARM_FMA, NATIVE, LTO)
+runs significantly faster on Pi 5 than the Ollama binary. llama-server exposes an
+OpenAI-compatible `/v1/chat/completions` API, so the agent uses the standard `openai`
+Python package — no Ollama-specific library needed.
+
+**Why hardcode "local" as the model name in API calls?**
+llama-server ignores the `model` field — it always serves whichever model it was
+started with. Hardcoding `"local"` makes this explicit and avoids confusion.
