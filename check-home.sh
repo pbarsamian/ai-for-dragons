@@ -29,7 +29,7 @@ echo "  ai-for-dragons home directory audit"
 echo "══════════════════════════════════════════════════════"
 
 # ── Wrapper scripts ────────────────────────────────────────────────────────
-hdr "Wrapper commands (~/.local/bin/):"
+hdr "Wrapper commands (~/.local/bin/ or /usr/local/bin/):"
 for cmd in dragon-agent ai-for-dragons sdr-agent sdr-mcp; do
     path=$(which "$cmd" 2>/dev/null || echo "")
     if [ -n "$path" ]; then
@@ -52,7 +52,6 @@ if [ -x "$VENV_PY" ]; then
     if [ -f "$PTH" ]; then
         ok "Install mode: EDITABLE"
         echo "       points to: $(cat "$PTH")"
-        # Check if that path actually exists and has sdr_mcp
         SRC=$(cat "$PTH")
         if [ -d "$SRC/sdr_mcp" ]; then
             VERSION=$("$VENV_PY" -c "import sdr_mcp; print(sdr_mcp.__version__)" 2>/dev/null || echo "unknown")
@@ -65,7 +64,7 @@ if [ -x "$VENV_PY" ]; then
         echo "       at: $SITE/sdr_mcp"
         echo "       Fix: bash update.sh  (switches to editable mode)"
     else
-        warn "sdr_mcp not found in venv — reinstall needed"
+        warn "sdr_mcp not found in venv — run: bash install.sh"
     fi
 
     # Check for leftover static copy alongside editable
@@ -73,8 +72,17 @@ if [ -x "$VENV_PY" ]; then
         warn "Old static sdr_mcp/ copy still in site-packages alongside .pth"
         echo "       Fix: rm -rf $SITE/sdr_mcp"
     fi
+
+    # Check openai
+    if "$VENV_PY" -c "import openai" 2>/dev/null; then
+        OPENAI_VER=$("$VENV_PY" -c "import openai; print(openai.__version__)" 2>/dev/null)
+        ok "openai $OPENAI_VER installed"
+    else
+        warn "openai not installed in venv"
+        echo "       Fix: bash update.sh"
+    fi
 else
-    warn "Venv not found — run the installer"
+    warn "Venv not found — run: bash install.sh"
 fi
 
 # ── Stale bundle directories ───────────────────────────────────────────────
@@ -87,7 +95,6 @@ for d in \
     ~/ai-for-dragons-bundle \
     ~/Downloads/sdr-mcp* \
     ~/Desktop/sdr-mcp*; do
-    # expand glob
     for expanded in $d; do
         if [ -d "$expanded" ]; then
             warn "Found: $expanded"
@@ -111,6 +118,7 @@ fi
 
 # ── Git repo ───────────────────────────────────────────────────────────────
 hdr "Git repo:"
+REPO_FOUND=false
 for candidate in \
     ~/ai-for-dragons \
     ~/sdr-mcp-pi5-bundle/sdr-mcp \
@@ -121,31 +129,53 @@ for candidate in \
         echo "       branch: $(git branch --show-current 2>/dev/null)"
         echo "       last commit: $(git log -1 --format='%h %s' 2>/dev/null)"
         BEHIND=$(git rev-list HEAD..origin/main --count 2>/dev/null || echo "?")
-        [ "$BEHIND" = "0" ] && ok "Up to date with origin/main" || warn "$BEHIND commit(s) behind origin/main — run: git pull"
+        [ "$BEHIND" = "0" ] && ok "Up to date with origin/main" || warn "$BEHIND commit(s) behind origin/main — run: bash update.sh"
         cd - > /dev/null
+        REPO_FOUND=true
     fi
 done
+if [ "$REPO_FOUND" = false ]; then
+    warn "No git repo found — clone with: git clone https://github.com/pbarsamian/ai-for-dragons"
+fi
 
-# ── Ollama ────────────────────────────────────────────────────────────────
-hdr "Ollama:"
-if command -v ollama &>/dev/null; then
-    ok "Installed: $(ollama --version 2>/dev/null | head -1)"
-    if systemctl is-active ollama &>/dev/null 2>&1; then
-        ok "Systemd service: active"
-    elif pgrep -x ollama &>/dev/null; then
-        ok "Process: running (not via systemd)"
+# ── llama-server ──────────────────────────────────────────────────────────
+hdr "llama-server (LLM inference):"
+if systemctl is-active --quiet llama-server 2>/dev/null; then
+    ok "Systemd service: active"
+    # Quick API check
+    if curl -sf http://localhost:8080/v1/models > /dev/null 2>&1; then
+        ok "API responding at http://localhost:8080"
     else
-        warn "NOT running — start with: ollama serve &  or  sudo systemctl start ollama"
+        warn "Service active but API not responding on port 8080 — still starting up?"
     fi
-
-    MODELS=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | tr '\n' ' ')
-    if [ -n "$MODELS" ]; then
-        ok "Models available: $MODELS"
-    else
-        warn "No models pulled — run: ollama pull qwen3:4b"
-    fi
+elif pgrep -x llama-server &>/dev/null; then
+    ok "Process running (not via systemd)"
+    curl -sf http://localhost:8080/v1/models > /dev/null 2>&1 \
+        && ok "API responding at http://localhost:8080" \
+        || warn "Process running but API not responding on port 8080"
 else
-    warn "Ollama not installed"
+    warn "llama-server NOT running"
+    if systemctl is-enabled --quiet llama-server 2>/dev/null; then
+        echo "       Service is enabled but not running — start with: sudo systemctl start llama-server"
+    else
+        echo "       Service not installed — run: bash install.sh"
+    fi
+fi
+
+# Check binary and model
+LLAMA_BIN=$(find "$HOME" -name "llama-server" -path "*/build/bin/*" 2>/dev/null | head -1)
+if [ -n "$LLAMA_BIN" ]; then
+    ok "Binary: $LLAMA_BIN"
+else
+    warn "llama-server binary not found — run: bash install.sh"
+fi
+
+LLAMA_MODEL=$(find "$HOME" -name "*.gguf" 2>/dev/null | head -1)
+if [ -n "$LLAMA_MODEL" ]; then
+    SIZE=$(du -h "$LLAMA_MODEL" | cut -f1)
+    ok "Model ($SIZE): $LLAMA_MODEL"
+else
+    warn "No .gguf model found — run: bash install.sh"
 fi
 
 # ── HackRF ────────────────────────────────────────────────────────────────
@@ -165,7 +195,6 @@ hdr "meshtastic-sniffer:"
 if command -v meshtastic-sniffer &>/dev/null; then
     ok "Installed: $(command -v meshtastic-sniffer)"
 else
-    # Check known build locations
     SNIFF_BIN=""
     for p in \
         "$HOME/meshtastic-sniffer/build/meshtastic-sniffer" \
