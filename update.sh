@@ -8,6 +8,11 @@
 # Every run after that: git pull is all that's required. Changes are
 #                       live the moment the pull completes.
 #
+# Also handles:
+#   - Installing the openai package into the venv (for llama-server)
+#   - Installing/updating the llama-server systemd service
+#   - Updating the dragon-agent wrapper script
+#
 # Run from anywhere — the script resolves its own location.
 
 set -e
@@ -111,6 +116,81 @@ fi
 VERSION=$("$VENV_PY" -c "import sdr_mcp; print(sdr_mcp.__version__)" 2>/dev/null || echo "unknown")
 SOURCE=$("$VENV_PY"  -c "import sdr_mcp, os; print(os.path.dirname(sdr_mcp.__file__))" 2>/dev/null || echo "unknown")
 success "sdr_mcp $VERSION loaded from: $SOURCE"
+
+# ── 5. Install openai into venv ────────────────────────────────────────────
+
+if ! "$VENV_PY" -c "import openai" 2>/dev/null; then
+    info "Installing openai package into venv..."
+    "$VENV/bin/pip" install openai
+    success "openai installed"
+else
+    success "openai already installed"
+fi
+
+# ── 6. Install/update llama-server systemd service ─────────────────────────
+
+LLAMA_BIN="$SCRIPT_DIR/llama.cpp/build/bin/llama-server"
+LLAMA_MODEL=$(find "$SCRIPT_DIR/llama.cpp/models" -name "*.gguf" 2>/dev/null | sort | head -1)
+LLAMA_SERVICE="/etc/systemd/system/llama-server.service"
+
+if [ -x "$LLAMA_BIN" ] && [ -n "$LLAMA_MODEL" ]; then
+    info "Installing/updating llama-server systemd service..."
+    sudo tee "$LLAMA_SERVICE" > /dev/null <<EOF
+[Unit]
+Description=llama-server LLM inference
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$SCRIPT_DIR/llama.cpp
+ExecStart=$LLAMA_BIN -m $LLAMA_MODEL --host 0.0.0.0 --port 8080 -t 4 -c 2048
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    sudo systemctl daemon-reload
+    sudo systemctl enable llama-server
+    if systemctl is-active --quiet llama-server; then
+        sudo systemctl restart llama-server
+        success "llama-server service restarted"
+    else
+        sudo systemctl start llama-server
+        success "llama-server service started"
+    fi
+else
+    warn "llama-server binary or model not found — skipping service install"
+    if [ ! -x "$LLAMA_BIN" ]; then
+        warn "  Binary missing: $LLAMA_BIN"
+        warn "  Build llama.cpp first — see README"
+    fi
+    if [ -z "$LLAMA_MODEL" ]; then
+        warn "  No .gguf model found in $SCRIPT_DIR/llama.cpp/models/"
+        warn "  Download a model first — see README"
+    fi
+fi
+
+# ── 7. Update dragon-agent wrapper ─────────────────────────────────────────
+
+WRAPPER_PATH=$(which dragon-agent 2>/dev/null || true)
+if [ -n "$WRAPPER_PATH" ]; then
+    info "Updating dragon-agent wrapper..."
+    sudo tee "$WRAPPER_PATH" > /dev/null <<EOF
+#!/usr/bin/env bash
+if ! pgrep -x llama-server &>/dev/null; then
+    echo "[sdr-agent] Starting llama-server..."
+    sudo systemctl start llama-server 2>/dev/null
+    sleep 4
+fi
+exec "$VENV_PY" "$SCRIPT_DIR/ollama_agent.py" "\$@"
+EOF
+    sudo chmod +x "$WRAPPER_PATH"
+    success "dragon-agent wrapper updated"
+else
+    warn "dragon-agent not found on PATH — wrapper not updated"
+fi
 
 echo ""
 echo "  dragon-agent will use the new code on next start."
