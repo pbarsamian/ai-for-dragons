@@ -2,7 +2,7 @@
 
 AI-powered SDR tool bridge for [DragonOS Pi64](https://sourceforge.net/projects/dragonos-pi64/) + HackRF One.
 
-Connects Claude Code (cloud) and local Ollama models to 70+ DragonOS tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Connects Claude Code (cloud) and a local LLM (llama-server / llama.cpp) to 70+ DragonOS tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 ```
 "Sweep 88–108 MHz, find the strongest signal, open it in GQRX"
@@ -12,7 +12,7 @@ Connects Claude Code (cloud) and local Ollama models to 70+ DragonOS tools via t
 ## What it does
 
 - **MCP server** — exposes DragonOS tools to Claude Code as callable functions
-- **Offline agent** — local AI assistant using Ollama (qwen3:4b default, works without internet)
+- **Offline agent** — local AI assistant using llama-server (llama.cpp) — works without internet after install
 - **71 tools** across 6 categories: HackRF, GQRX, app management, aviation/maritime decoding, protocol interpretation, and exercises
 - **Hardware exclusivity management** — automatically stops/starts apps around sweeps so you never fight over the HackRF
 
@@ -22,7 +22,7 @@ Connects Claude Code (cloud) and local Ollama models to 70+ DragonOS tools via t
 |---|---|
 | Raspberry Pi 5 (16 GB) | 8 GB minimum |
 | HackRF One | Plug into blue USB 3.0 port |
-| Active cooler | Required — installer checks temperature |
+| Active cooler | Required — CPU hits 80°C+ under inference load |
 | 32 GB+ SD card (A2-rated) | 128 GB recommended |
 | DragonOS Pi64 | Pre-flashed on SD card |
 
@@ -32,17 +32,25 @@ Connects Claude Code (cloud) and local Ollama models to 70+ DragonOS tools via t
 # On the Pi after flashing DragonOS Pi64:
 sudo raspi-config --expand-rootfs && sudo reboot
 
-# Copy the release zip to the Pi, then:
-unzip ai-for-dragons-pi5.zip && cd ai-for-dragons-pi5-bundle
-bash ai-for-dragons-install-pi5.sh      # installs everything (~15 min first run)
+# Clone and install (~15 min — builds llama.cpp from source)
+git clone https://github.com/pbarsamian/ai-for-dragons
+cd ai-for-dragons
+bash install.sh
 
 # Start the AI agent
 dragon-agent
-
-# Or with a faster/smarter model
-dragon-agent --model qwen3:1.7b
-dragon-agent --model qwen3:8b
 ```
+
+That's it. `dragon-agent` will start llama-server automatically if it isn't running.
+
+## Updating
+
+```bash
+cd ai-for-dragons
+bash update.sh
+```
+
+`update.sh` pulls the latest code, updates the systemd service if paths changed, and keeps the openai package current. After the first install, `git pull` is all that's needed for code changes — the editable install means changes are live immediately.
 
 ## Install from PyPI (advanced)
 
@@ -50,7 +58,7 @@ dragon-agent --model qwen3:8b
 pip install ai-for-dragons
 ```
 
-Requires DragonOS Pi64 or equivalent DragonOS environment with HackRF tools installed.
+Requires DragonOS Pi64 or equivalent environment with HackRF tools installed. Does not include llama.cpp or model download — run `install.sh` for a full setup.
 
 ## Tool categories
 
@@ -91,7 +99,7 @@ Then just talk naturally:
 ## Architecture
 
 ```
-Claude Code / Ollama
+Claude Code / dragon-agent (llama-server)
        │
    ai-for-dragons (MCP stdio server)
        │
@@ -104,6 +112,8 @@ Claude Code / Ollama
    DragonOS Pi64 tools
    (GQRX, dump1090, GNU Radio, etc.)
 ```
+
+**LLM stack:** llama-server (llama.cpp) runs locally on the Pi — fully offline after install. Default model: Qwen2.5-1.5B-Instruct Q4_K_M (~1 GB, ~12 tokens/sec on Pi 5). The agent talks to it via the OpenAI-compatible `/v1/chat/completions` API on port 8080.
 
 ## Development
 
