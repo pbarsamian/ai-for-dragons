@@ -130,7 +130,7 @@ fi
 # ── 6. Install/update llama-server systemd service ─────────────────────────
 
 LLAMA_BIN="$SCRIPT_DIR/llama.cpp/build/bin/llama-server"
-LLAMA_MODEL=$(find "$SCRIPT_DIR/llama.cpp/models" -name "*.gguf" 2>/dev/null | sort | head -1)
+LLAMA_MODEL=$(find "$SCRIPT_DIR/llama.cpp/models" -name "*.gguf" ! -name "ggml-vocab*" 2>/dev/null | sort | head -1)
 LLAMA_SERVICE="/etc/systemd/system/llama-server.service"
 
 if [ -x "$LLAMA_BIN" ] && [ -n "$LLAMA_MODEL" ]; then
