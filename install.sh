@@ -51,7 +51,9 @@ sudo apt-get install -y \
     python3 python3-pip python3-venv \
     cmake build-essential git \
     libopenblas-dev \
-    wget curl lsof usbutils netcat-openbsd
+    wget curl lsof usbutils netcat-openbsd \
+    readsb \
+    gr-air-modes
 success "System packages ready"
 
 # ── 2. Python venv ─────────────────────────────────────────────────────────
