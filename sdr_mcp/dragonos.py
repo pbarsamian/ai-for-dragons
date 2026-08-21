@@ -320,16 +320,15 @@ def _adsb_dump1090(duration_sec: int, dev_idx: int = 0, dev_serial: str = "") ->
             "install": "sudo apt install readsb",
         }, indent=2)
 
-    bin_name = os.path.basename(dump1090)
     tmpdir = tempfile.mkdtemp(prefix="dump1090_")
 
     cmd = [dump1090, "--quiet", "--net", "--write-json", tmpdir]
     if dev_serial:
-        # Both readsb and dump1090-fa support --device-serial
+        # readsb and dump1090-fa both support --device-serial
         cmd += ["--device-serial", dev_serial]
-    elif "readsb" in bin_name:
-        cmd += ["--device", str(dev_idx)]
     else:
+        # --device-index works for readsb and all dump1090 variants
+        # Note: readsb's --device flag is for input TYPE (modesbeast/ifile/etc), NOT index
         cmd += ["--device-index", str(dev_idx)]
 
     aircraft_file = os.path.join(tmpdir, "aircraft.json")
