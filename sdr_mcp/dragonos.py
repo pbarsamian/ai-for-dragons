@@ -538,6 +538,80 @@ def _adsb_modes_rx(duration_sec: int) -> str:
     }, indent=2)
 
 
+def _adsb_rtl_adsb(duration_sec: int, dev_idx: int = 0, dev_serial: str = "") -> str:
+    """ADS-B via rtl_adsb (rtl-sdr package). Reads RTL-SDR directly, outputs *hex; frames."""
+    rtl_adsb_bin = shutil.which("rtl_adsb")
+    if not rtl_adsb_bin:
+        return json.dumps({"status": "tool_not_found", "message": "rtl_adsb not found."}, indent=2)
+
+    # rtl_adsb -d accepts index OR serial string (uses librtlsdr device selection)
+    rtl_dev = dev_serial if dev_serial else str(dev_idx)
+    cmd = [rtl_adsb_bin, "-d", rtl_dev, "-g", "0"]
+
+    start = time.time()
+    aircraft: dict = {}
+    frame_count = 0
+
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    try:
+        while time.time() - start < duration_sec:
+            if proc.poll() is not None:
+                break
+            line = proc.stdout.readline()
+            if not line:
+                break
+            line = line.strip()
+            # ADS-B frames arrive as: *<UPPERCASE_HEX>;
+            if not (line.startswith("*") and line.endswith(";")):
+                continue
+            hex_data = line[1:-1]
+            frame_count += 1
+            # DF17 (ADS-B extended squitter) = 14 bytes = 28 hex chars
+            # Top 5 bits of byte 0 = 17 (10001x) → first byte 0x88-0x8F
+            if len(hex_data) == 28:
+                try:
+                    df = int(hex_data[:2], 16) >> 3
+                except ValueError:
+                    continue
+                if df == 17:
+                    icao = hex_data[2:8].lower()
+                    ac = aircraft.setdefault(icao, {"hex": icao})
+                    try:
+                        tc = int(hex_data[8:10], 16) >> 3  # type code from ME field
+                        if 1 <= tc <= 4:
+                            ac["has_callsign"] = True
+                        elif 9 <= tc <= 22:
+                            ac["has_position"] = True
+                    except ValueError:
+                        pass
+                    elapsed = int(time.time() - start)
+                    print(f"\n  [adsb +{elapsed}s] {icao}  ({len(aircraft)} unique aircraft)", flush=True)
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+    if not aircraft:
+        return json.dumps({
+            "status": "no_aircraft",
+            "frames_decoded": frame_count,
+            "duration_sec": duration_sec,
+            "message": "No ADS-B aircraft detected. Ensure antenna is connected and aircraft are within ~100-200 nm.",
+        }, indent=2)
+
+    return json.dumps({
+        "status": "complete",
+        "backend": "rtl_adsb",
+        "freq_mhz": 1090.0,
+        "duration_sec": duration_sec,
+        "frames_decoded": frame_count,
+        "aircraft_seen": len(aircraft),
+        "aircraft": list(aircraft.values()),
+    }, indent=2)
+
+
 def adsb_scan(duration_sec: int = 30, device: str = "auto") -> str:
     """
     Decode ADS-B aircraft transponders at 1090 MHz.
@@ -562,25 +636,37 @@ def adsb_scan(duration_sec: int = 30, device: str = "auto") -> str:
         rtlsdrs = [r for r in radios if r["type"] == "rtlsdr"]
         hackrfs  = [r for r in radios if r["type"] == "hackrf"]
 
-        dump1090_bin = (shutil.which("readsb")
-                        or shutil.which("dump1090")
+        # Decoder priority for RTL-SDR ADS-B:
+        #   1. dump1090 / dump1090-fa / dump1090-mutability — proper --device-serial support
+        #   2. rtl_adsb (rtl-sdr package) — drives RTL-SDR directly, outputs *hex; frames
+        #   3. readsb — last resort (DragonOS build lacks RTL-SDR driver support)
+        dump1090_bin = (shutil.which("dump1090")
                         or shutil.which("dump1090-fa")
                         or shutil.which("dump1090-mutability"))
+        readsb_bin   = shutil.which("readsb")
+        rtl_adsb_bin = shutil.which("rtl_adsb")
         modes_rx_bin = shutil.which("modes_rx")
 
-        if rtlsdrs and dump1090_bin:
-            # Prefer stratux:1090 (filtered for 1090 MHz) over generic RTL-SDR dongles
+        if rtlsdrs and (dump1090_bin or rtl_adsb_bin or readsb_bin):
+            # Prefer stratux:1090 (pre-filtered for 1090 MHz ADS-B)
             preferred = next(
                 (r for r in rtlsdrs if "1090" in r.get("description", "").lower()),
                 rtlsdrs[0]
             )
-            # Extract serial number from description (e.g. "SN: stratux:1090")
             serial = ""
             desc = preferred.get("description", "")
             if "SN:" in desc:
                 serial = desc.split("SN:")[-1].strip()
-            print(f"\n  [auto] Using {preferred['description']} with {os.path.basename(dump1090_bin)}", flush=True)
-            return _adsb_dump1090(duration_sec, dev_idx=preferred.get("index", 0), dev_serial=serial)
+
+            if dump1090_bin:
+                print(f"\n  [auto] Using {preferred['description']} with {os.path.basename(dump1090_bin)}", flush=True)
+                return _adsb_dump1090(duration_sec, dev_idx=preferred.get("index", 0), dev_serial=serial)
+            elif rtl_adsb_bin:
+                print(f"\n  [auto] Using {preferred['description']} with rtl_adsb", flush=True)
+                return _adsb_rtl_adsb(duration_sec, dev_idx=preferred.get("index", 0), dev_serial=serial)
+            else:
+                print(f"\n  [auto] Using {preferred['description']} with readsb", flush=True)
+                return _adsb_dump1090(duration_sec, dev_idx=preferred.get("index", 0), dev_serial=serial)
 
         if hackrfs and modes_rx_bin:
             print(f"\n  [auto] Using HackRF with modes_rx", flush=True)
@@ -588,8 +674,8 @@ def adsb_scan(duration_sec: int = 30, device: str = "auto") -> str:
 
         # Hardware present but missing software
         missing = []
-        if rtlsdrs and not dump1090_bin:
-            missing.append("RTL-SDR detected but ADS-B decoder missing (sudo apt install readsb)")
+        if rtlsdrs and not any([dump1090_bin, rtl_adsb_bin, readsb_bin]):
+            missing.append("RTL-SDR detected but no ADS-B decoder found (sudo apt install rtl-sdr)")
         if hackrfs and not modes_rx_bin:
             missing.append("HackRF detected but modes_rx missing (sudo apt install gr-air-modes)")
         if not rtlsdrs and not hackrfs:
