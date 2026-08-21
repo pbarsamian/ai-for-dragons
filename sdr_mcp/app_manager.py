@@ -102,6 +102,21 @@ def _resolve_sdr_device(device: str, allowed: tuple = ("hackrf", "rtlsdr")) -> "
                 return _json.dumps({"status": "error",
                     "message": "HackRF not supported by this tool."}, indent=2)
             return {"type": "hackrf", "index": None, "description": "HackRF One"}
+        if device.startswith("rtlsdr:serial:"):
+            if "rtlsdr" not in allowed:
+                return _json.dumps({"status": "error",
+                    "message": "RTL-SDR not supported by this tool."}, indent=2)
+            serial_name = device[len("rtlsdr:serial:"):]
+            try:
+                from .dragonos import detect_radios
+                radios = detect_radios()
+                for r in radios:
+                    if r["type"] == "rtlsdr" and r.get("serial", "").lower() == serial_name.lower():
+                        return {"type": "rtlsdr", "index": r["index"], "description": r["description"]}
+            except Exception:
+                pass
+            return _json.dumps({"status": "error",
+                "message": f"No RTL-SDR found with serial '{serial_name}'."}, indent=2)
         if device.startswith("rtlsdr"):
             if "rtlsdr" not in allowed:
                 return _json.dumps({"status": "error",
@@ -110,7 +125,7 @@ def _resolve_sdr_device(device: str, allowed: tuple = ("hackrf", "rtlsdr")) -> "
             idx = int(parts[1]) if len(parts) > 1 else 0
             return {"type": "rtlsdr", "index": idx, "description": f"RTL-SDR #{idx}"}
         return _json.dumps({"status": "error",
-            "message": f"Unknown device '{device}'. Use 'auto', 'hackrf', or 'rtlsdr:N'."}, indent=2)
+            "message": f"Unknown device '{device}'. Use 'auto', 'hackrf', 'rtlsdr:N', or 'rtlsdr:serial:NAME'."}, indent=2)
 
     # Auto-detect
     try:
@@ -484,7 +499,7 @@ def app_status() -> str:
             "gqrx_remote_7356":       _wait_for_port(7356, timeout_sec=2) if _is_running("gqrx") else False,
             "openwebrx_8073":         _wait_for_port(8073, timeout_sec=2),
             "dump1090_web_8080":      _wait_for_port(8080, timeout_sec=2),
-            "ollama_11434":           _wait_for_port(11434, timeout_sec=2),
+            "llama_server_8080":      _wait_for_port(8080, timeout_sec=2),
         },
     }
     return json.dumps(status, indent=2)

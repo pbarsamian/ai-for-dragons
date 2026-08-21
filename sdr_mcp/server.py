@@ -61,7 +61,7 @@ def _handle_initialize(req_id: Any, params: dict) -> bytes:
         "serverInfo": {
             "name": "ai-for-dragons",
             "version": "0.3.0",
-            "description": "DragonOS SDR tool bridge for Ollama and MCP-compatible clients",
+            "description": "DragonOS SDR tool bridge for llama-server and MCP-compatible clients",
         },
         "capabilities": {"tools": {}},
     })

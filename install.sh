@@ -12,6 +12,7 @@
 #   6. Downloads the default model (Qwen2.5-1.5B Q4_K_M, ~1 GB)
 #   7. Installs llama-server as a systemd service (auto-start on boot)
 #   8. Installs the dragon-agent command to /usr/local/bin
+#   9. Builds and installs dump978-fa (UAT 978 MHz decoder for stratux:978)
 #
 # Usage:
 #   git clone https://github.com/pbarsamian/ai-for-dragons
@@ -185,6 +186,15 @@ exec "$VENV_PY" "$SCRIPT_DIR/ollama_agent.py" "\$@"
 EOF
 sudo chmod +x "$WRAPPER_DEST"
 success "dragon-agent installed to $WRAPPER_DEST"
+
+# ── 9. dump978-fa (UAT 978 MHz decoder) ───────────────────────────────────
+header "dump978-fa (UAT 978 MHz decoder)"
+if command -v dump978-fa &>/dev/null; then
+    success "dump978-fa already installed"
+else
+    info "Building dump978-fa from source (~1 min)..."
+    bash "$SCRIPT_DIR/install-dump978.sh"
+fi
 
 # ── Optional: meshtastic-sniffer reminder ──────────────────────────────────
 echo ""

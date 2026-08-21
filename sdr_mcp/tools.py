@@ -58,6 +58,7 @@ from .dragonos import (
     signal_identify,
     meshtastic_sniff,
     adsb_scan,
+    uat_scan,
     gsm_scan,
     flowgraph_run,
 )
@@ -291,6 +292,12 @@ def _meshtastic_sniff(args: dict) -> str:
 
 def _adsb_scan(args: dict) -> str:
     return adsb_scan(
+        duration_sec=int(args.get("duration_sec", 30)),
+        device=str(args.get("device", "auto")),
+    )
+
+def _uat_scan(args: dict) -> str:
+    return uat_scan(
         duration_sec=int(args.get("duration_sec", 30)),
         device=str(args.get("device", "auto")),
     )
@@ -1143,10 +1150,9 @@ TOOL_REGISTRY: dict[str, dict] = {
     "adsb_scan": {
         "description": (
             "Decode ADS-B aircraft transponders at 1090 MHz. "
-            "Auto-detects the best available radio+decoder: RTL-SDR+dump1090 preferred, "
-            "HackRF+modes_rx (gr-air-modes) as fallback. "
-            "Returns aircraft list with ICAO, callsign, position, altitude. "
-            "If multiple viable combinations exist, returns a list so you can ask the user which to use."
+            "Auto-detects best radio: prefers stratux:1090 RTL-SDR (filtered for 1090 MHz), "
+            "falls back to any RTL-SDR+readsb, then HackRF+modes_rx. "
+            "Returns aircraft list with ICAO, callsign, position, altitude."
         ),
         "schema": {
             "type": "object",
@@ -1157,6 +1163,24 @@ TOOL_REGISTRY: dict[str, dict] = {
             "required": [],
         },
         "fn": _adsb_scan,
+    },
+    "uat_scan": {
+        "description": (
+            "Decode 978 MHz UAT (Universal Access Transceiver) traffic — US general aviation only. "
+            "Captures ADS-B Out position reports, FIS-B weather broadcasts, and TIS-B traffic. "
+            "Auto-detects stratux:978 RTL-SDR (pre-filtered for 978 MHz). "
+            "Requires dump978-fa (build with: bash install-dump978.sh). "
+            "Run simultaneously with adsb_scan — uses a different dongle, no hardware conflict."
+        ),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "duration_sec": {"type": "integer", "description": "Scan duration in seconds (default 30)"},
+                "device":       {"type": "string",  "description": "Radio to use: 'auto' (default) or 'rtlsdr:N'"},
+            },
+            "required": [],
+        },
+        "fn": _uat_scan,
     },
     "gsm_scan": {
         "description": (

@@ -40,7 +40,8 @@ Key tools:
   hackrf_sweep(freq_min, freq_max)           wideband spectrum survey
   hackrf_capture / analyze / replay          IQ file operations
   meshtastic_sniff(freq_mhz, duration_sec)   LoRa packets; US=906.875 MHz, duration unlimited
-  adsb_scan(duration_sec, device)            aircraft ADS-B at 1090 MHz; auto-selects RTL-SDR or HackRF
+  adsb_scan(duration_sec, device)            aircraft ADS-B at 1090 MHz; prefers stratux:1090 RTL-SDR
+  uat_scan(duration_sec, device)             978 MHz UAT traffic; prefers stratux:978 RTL-SDR (US only)
   gsm_scan(band)                             GSM base stations
   rtl433_start / rtlais_start / dumpvdl2_start  ISM/AIS/VDL2 decoders
   rtlsdr_info / rtlsdr_capture / rtlsdr_power   RTL-SDR (RX only, 24-1766 MHz, runs alongside HackRF)
@@ -74,8 +75,8 @@ CORE_TOOL_NAMES = {
     "hackrf_info", "hackrf_sweep", "hackrf_capture", "hackrf_analyze", "hackrf_replay",
     # GQRX SDR receiver
     "gqrx_status", "gqrx_tune", "gqrx_stop", "gqrx_start",
-    # DragonOS protocol scanners (active — use HackRF)
-    "meshtastic_sniff", "adsb_scan", "gsm_scan",
+    # DragonOS protocol scanners (active — use HackRF or RTL-SDR)
+    "meshtastic_sniff", "adsb_scan", "uat_scan", "gsm_scan",
     "rtl433_start",     # ISM band sensors: weather, tire pressure, power meters (433/868/915 MHz)
     "rtlais_start",     # AIS marine vessel transponders (161/162 MHz)
     "dumpvdl2_start",   # VHF aircraft datalink (136 MHz — near airports)

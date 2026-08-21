@@ -304,8 +304,8 @@ def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 60, device: 
     }, indent=2)
 
 
-def _adsb_dump1090(duration_sec: int, dev_idx: int = 0) -> str:
-    """ADS-B via dump1090 + RTL-SDR. Writes aircraft.json every ~1s, polls it."""
+def _adsb_dump1090(duration_sec: int, dev_idx: int = 0, dev_serial: str = "") -> str:
+    """ADS-B via readsb/dump1090 + RTL-SDR. Writes aircraft.json every ~1s, polls it."""
     import tempfile
     import shutil as _shutil
 
@@ -320,11 +320,18 @@ def _adsb_dump1090(duration_sec: int, dev_idx: int = 0) -> str:
             "install": "sudo apt install readsb",
         }, indent=2)
 
-    # --net          opens HTTP/SBS ports; --write-json writes aircraft.json
-    # --device-index selects which RTL-SDR when multiple are attached
+    bin_name = os.path.basename(dump1090)
     tmpdir = tempfile.mkdtemp(prefix="dump1090_")
-    cmd = [dump1090, "--quiet", "--net", "--write-json", tmpdir,
-           "--device-index", str(dev_idx)]
+
+    cmd = [dump1090, "--quiet", "--net", "--write-json", tmpdir]
+    if dev_serial:
+        # Both readsb and dump1090-fa support --device-serial
+        cmd += ["--device-serial", dev_serial]
+    elif "readsb" in bin_name:
+        cmd += ["--device", str(dev_idx)]
+    else:
+        cmd += ["--device-index", str(dev_idx)]
+
     aircraft_file = os.path.join(tmpdir, "aircraft.json")
     start = time.time()
     aircraft: dict = {}
@@ -337,7 +344,7 @@ def _adsb_dump1090(duration_sec: int, dev_idx: int = 0) -> str:
                 _shutil.rmtree(tmpdir, ignore_errors=True)
                 return json.dumps({
                     "status": "error",
-                    "message": "dump1090 exited early — RTL-SDR may be busy or unplugged.",
+                    "message": "readsb exited early — RTL-SDR may be busy or unplugged.",
                     "detail": err,
                 }, indent=2)
             if os.path.exists(aircraft_file):
@@ -492,49 +499,36 @@ def adsb_scan(duration_sec: int = 30, device: str = "auto") -> str:
                         or shutil.which("dump1090-mutability"))
         modes_rx_bin = shutil.which("modes_rx")
 
-        # Build list of viable (radio, backend) options
-        options = []
         if rtlsdrs and dump1090_bin:
-            for r in rtlsdrs:
-                options.append({"radio": r, "backend": "dump1090",
-                                 "id": f"rtlsdr:{r.get('index', 0)}"})
+            # Prefer stratux:1090 (filtered for 1090 MHz) over generic RTL-SDR dongles
+            preferred = next(
+                (r for r in rtlsdrs if "1090" in r.get("description", "").lower()),
+                rtlsdrs[0]
+            )
+            # Extract serial number from description (e.g. "SN: stratux:1090")
+            serial = ""
+            desc = preferred.get("description", "")
+            if "SN:" in desc:
+                serial = desc.split("SN:")[-1].strip()
+            print(f"\n  [auto] Using {preferred['description']} with {os.path.basename(dump1090_bin)}", flush=True)
+            return _adsb_dump1090(duration_sec, dev_idx=preferred.get("index", 0), dev_serial=serial)
+
         if hackrfs and modes_rx_bin:
-            options.append({"radio": hackrfs[0], "backend": "modes_rx",
-                             "id": "hackrf"})
+            print(f"\n  [auto] Using HackRF with modes_rx", flush=True)
+            return _adsb_modes_rx(duration_sec)
 
-        if not options:
-            # Hardware present but missing software
-            missing = []
-            if rtlsdrs and not dump1090_bin:
-                missing.append("RTL-SDR detected but ADS-B decoder missing (sudo apt install readsb)")
-            if hackrfs and not modes_rx_bin:
-                missing.append("HackRF detected but modes_rx missing (sudo apt install gr-air-modes)")
-            return json.dumps({
-                "status": "tool_not_found",
-                "message": "Required decoder software not found.",
-                "details": missing,
-            }, indent=2)
-
-        if len(options) == 1:
-            opt = options[0]
-            print(f"\n  [auto] Using {opt['radio']['description']} with {opt['backend']}", flush=True)
-            if opt["backend"] == "dump1090":
-                return _adsb_dump1090(duration_sec, dev_idx=opt["radio"].get("index", 0))
-            else:
-                return _adsb_modes_rx(duration_sec)
-
-        # Multiple viable options — ask the user to choose
+        # Hardware present but missing software
+        missing = []
+        if rtlsdrs and not dump1090_bin:
+            missing.append("RTL-SDR detected but ADS-B decoder missing (sudo apt install readsb)")
+        if hackrfs and not modes_rx_bin:
+            missing.append("HackRF detected but modes_rx missing (sudo apt install gr-air-modes)")
+        if not rtlsdrs and not hackrfs:
+            missing.append("No compatible SDR radio detected")
         return json.dumps({
-            "status": "multiple_options",
-            "message": (
-                "Multiple SDR + decoder combinations available. "
-                "Re-call adsb_scan with device= set to your choice."
-            ),
-            "options": [
-                {"id": o["id"],
-                 "description": f"{o['radio']['description']} → {o['backend']}"}
-                for o in options
-            ],
+            "status": "tool_not_found",
+            "message": "Required decoder software not found.",
+            "details": missing,
         }, indent=2)
 
     # Explicit device selection
@@ -547,6 +541,109 @@ def adsb_scan(duration_sec: int = 30, device: str = "auto") -> str:
         return _adsb_modes_rx(duration_sec)
 
     return json.dumps({"status": "error", "message": f"Unknown device '{device}'. Use 'auto', 'rtlsdr', 'rtlsdr:N', or 'hackrf'."}, indent=2)
+
+
+def uat_scan(duration_sec: int = 30, device: str = "auto") -> str:
+    """
+    Decode 978 MHz UAT (Universal Access Transceiver) traffic using the stratux:978 RTL-SDR.
+    Captures ADS-B Out, FIS-B weather, and TIS-B traffic — US only.
+
+    Requires dump978-fa (build with: bash install-dump978.sh).
+    Best with a stratux:978 dongle (pre-filtered for 978 MHz).
+
+    device="auto"      — prefer stratux:978, fall back to first RTL-SDR available
+    device="rtlsdr:N"  — use RTL-SDR device index N explicitly
+    """
+    dump978_bin = shutil.which("dump978-fa") or shutil.which("dump978")
+    rtl_sdr_bin = shutil.which("rtl_sdr")
+
+    if not dump978_bin:
+        return json.dumps({
+            "status": "tool_not_found",
+            "message": "dump978-fa not installed. Build with: bash install-dump978.sh",
+        }, indent=2)
+    if not rtl_sdr_bin:
+        return json.dumps({
+            "status": "tool_not_found",
+            "message": "rtl_sdr not found. Install: sudo apt install rtl-sdr",
+        }, indent=2)
+
+    if device == "auto":
+        rtlsdrs = _detect_rtlsdr()
+        if not rtlsdrs:
+            return json.dumps({"status": "no_radio", "message": "No RTL-SDR found for UAT decoding."}, indent=2)
+        # Prefer device with "978" in description (stratux:978)
+        dev = next(
+            (r for r in rtlsdrs if "978" in r.get("description", "").lower()),
+            rtlsdrs[0]
+        )
+        dev_idx = dev.get("index", 0)
+        print(f"\n  [auto] Using {dev['description']} for UAT 978 MHz", flush=True)
+    else:
+        parts = device.split(":", 1)
+        dev_idx = int(parts[1]) if len(parts) > 1 else 0
+
+    start = time.time()
+    messages = []
+
+    # Pipe rtl_sdr raw IQ → dump978-fa for decoding
+    # 978 MHz, 2.083334 MSPS (required sample rate for UAT), gain 48
+    rtlsdr_cmd = [rtl_sdr_bin, "-f", "978000000", "-s", "2083334",
+                  "-g", "48", "-d", str(dev_idx), "-"]
+    dump978_flags = ["--raw-stdin"]
+    if "dump978-fa" in os.path.basename(dump978_bin):
+        dump978_flags.append("--json-stdout")
+    dump978_cmd = [dump978_bin] + dump978_flags
+
+    import select as _select
+    proc_rtl = subprocess.Popen(rtlsdr_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    proc_dump = subprocess.Popen(
+        dump978_cmd, stdin=proc_rtl.stdout,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+    )
+    proc_rtl.stdout.close()
+
+    try:
+        while time.time() - start < duration_sec:
+            ready, _, _ = _select.select([proc_dump.stdout], [], [], 2.0)
+            if not ready:
+                if proc_dump.poll() is not None:
+                    break
+                continue
+            line = proc_dump.stdout.readline()
+            if not line:
+                break
+            line = line.strip()
+            if line:
+                messages.append(line)
+                elapsed = int(time.time() - start)
+                print(f"\n  [uat978 +{elapsed}s] {line[:120]}", flush=True)
+    finally:
+        for p in (proc_rtl, proc_dump):
+            try:
+                p.terminate()
+                p.wait(timeout=3)
+            except Exception:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+
+    if not messages:
+        return json.dumps({
+            "status": "no_traffic",
+            "duration_sec": duration_sec,
+            "message": "No UAT traffic detected on 978 MHz. UAT is US-only. Aircraft must be equipped and within ~100 nm.",
+        }, indent=2)
+
+    return json.dumps({
+        "status": "ok",
+        "duration_sec": duration_sec,
+        "message_count": len(messages),
+        "messages": messages[:50],
+        "backend": f"rtlsdr+{os.path.basename(dump978_bin)}",
+        "note": "Messages include ADS-B position, FIS-B weather, and TIS-B traffic. Use interpret_adsb to decode individual frames.",
+    }, indent=2)
 
 
 def gsm_scan(band: str = "GSM850", device: str = "auto") -> str:
