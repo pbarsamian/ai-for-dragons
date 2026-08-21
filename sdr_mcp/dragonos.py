@@ -309,14 +309,15 @@ def _adsb_dump1090(duration_sec: int, dev_idx: int = 0) -> str:
     import tempfile
     import shutil as _shutil
 
-    dump1090 = (shutil.which("dump1090")
+    dump1090 = (shutil.which("readsb")
+                or shutil.which("dump1090")
                 or shutil.which("dump1090-fa")
                 or shutil.which("dump1090-mutability"))
     if not dump1090:
         return json.dumps({
             "status": "tool_not_found",
-            "message": "dump1090 not found.",
-            "install": "sudo apt install dump1090-mutability",
+            "message": "ADS-B decoder not found.",
+            "install": "sudo apt install readsb",
         }, indent=2)
 
     # --net          opens HTTP/SBS ports; --write-json writes aircraft.json
@@ -485,7 +486,8 @@ def adsb_scan(duration_sec: int = 30, device: str = "auto") -> str:
         rtlsdrs = [r for r in radios if r["type"] == "rtlsdr"]
         hackrfs  = [r for r in radios if r["type"] == "hackrf"]
 
-        dump1090_bin = (shutil.which("dump1090")
+        dump1090_bin = (shutil.which("readsb")
+                        or shutil.which("dump1090")
                         or shutil.which("dump1090-fa")
                         or shutil.which("dump1090-mutability"))
         modes_rx_bin = shutil.which("modes_rx")
@@ -504,7 +506,7 @@ def adsb_scan(duration_sec: int = 30, device: str = "auto") -> str:
             # Hardware present but missing software
             missing = []
             if rtlsdrs and not dump1090_bin:
-                missing.append("RTL-SDR detected but dump1090 missing (sudo apt install dump1090-mutability)")
+                missing.append("RTL-SDR detected but ADS-B decoder missing (sudo apt install readsb)")
             if hackrfs and not modes_rx_bin:
                 missing.append("HackRF detected but modes_rx missing (sudo apt install gr-air-modes)")
             return json.dumps({
