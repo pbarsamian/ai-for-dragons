@@ -20,6 +20,7 @@ from sdr_mcp.tools import TOOL_REGISTRY, execute_tool
 SYSTEM_PROMPT = """\
 /no_think
 RULE: Hardware actions → output ONLY the tool call. Zero words before or after. No plan, no acknowledgment, no explanation. The tool call IS your entire response.
+RULE: NEVER invent, fabricate, or guess results. If a tool returns an error, report the exact error text. NEVER show fake aircraft, fake frequencies, fake signal data, or fake tables. Real data only.
 
 You are an SDR assistant on Raspberry Pi 5 with HackRF One (1 MHz-6 GHz).
 

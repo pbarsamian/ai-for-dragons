@@ -324,18 +324,29 @@ def _adsb_dump1090(duration_sec: int, dev_idx: int = 0, dev_serial: str = "") ->
     tmpdir = tempfile.mkdtemp(prefix="dump1090_")
     aircraft_file = os.path.join(tmpdir, "aircraft.json")
 
-    # readsb on DragonOS rejects --device-serial, --device-index, and treats
-    # --device <N> as an input type name rather than an RTL-SDR device index.
+    # readsb on DragonOS rejects --device-serial, --device-index, --format, and
+    # treats --device <N> as an input type rather than an RTL-SDR index.
     # Workaround: pipe rtl_sdr (which accepts -d <index|serial>) into readsb's
-    # ifile/stdin mode — the same pattern used by the UAT scanner.
-    rtl_sdr_bin = shutil.which("rtl_sdr")
-    if "readsb" in bin_name and rtl_sdr_bin:
-        # rtl_sdr -d accepts numeric index OR serial name string
+    # stdin. Two strategies tried in order:
+    #   1. ifile mode (raw IQ — no --format flag, let readsb use its default)
+    #   2. modesbeast via rtl_adsb (pre-decoded Mode S output)
+    rtl_sdr_bin  = shutil.which("rtl_sdr")
+    rtl_adsb_bin = shutil.which("rtl_adsb")
+    if "readsb" in bin_name and (rtl_sdr_bin or rtl_adsb_bin):
         rtl_dev = dev_serial if dev_serial else str(dev_idx)
-        rtlsdr_cmd = [rtl_sdr_bin, "-f", "1090000000", "-s", "2400000",
-                      "-g", "49.6", "-d", rtl_dev, "-"]
-        readsb_cmd = [dump1090, "--device", "ifile", "--ifile", "-",
-                      "--format", "UC8", "--quiet", "--net", "--write-json", tmpdir]
+
+        if rtl_sdr_bin:
+            # Strategy 1: raw IQ via ifile mode (--format deliberately omitted;
+            # this readsb build doesn't support it and defaults to raw UC8)
+            rtlsdr_cmd = [rtl_sdr_bin, "-f", "1090000000", "-s", "2400000",
+                          "-g", "49.6", "-d", rtl_dev, "-"]
+            readsb_cmd = [dump1090, "--device", "ifile", "--ifile", "-",
+                          "--quiet", "--net", "--write-json", tmpdir]
+        else:
+            # Strategy 2: pre-decoded Mode S via rtl_adsb → modesbeast
+            rtlsdr_cmd = [rtl_adsb_bin, "-d", rtl_dev, "-V"]
+            readsb_cmd = [dump1090, "--device", "modesbeast", "--ifile", "-",
+                          "--quiet", "--net", "--write-json", tmpdir]
 
         start = time.time()
         aircraft: dict = {}
@@ -350,8 +361,12 @@ def _adsb_dump1090(duration_sec: int, dev_idx: int = 0, dev_serial: str = "") ->
                     _shutil.rmtree(tmpdir, ignore_errors=True)
                     return json.dumps({
                         "status": "error",
-                        "message": "readsb (ifile mode) exited early.",
+                        "message": "readsb exited early.",
                         "detail": err,
+                        "hint": (
+                            "Run 'readsb --help 2>&1 | grep -i device' on the Pi "
+                            "and share the output so the device-selection flags can be tuned."
+                        ),
                     }, indent=2)
                 if os.path.exists(aircraft_file):
                     try:
