@@ -144,7 +144,7 @@ After=network.target
 Type=simple
 User=$USER
 WorkingDirectory=$SCRIPT_DIR/llama.cpp
-ExecStart=$LLAMA_BIN -m $LLAMA_MODEL --host 0.0.0.0 --port 8080 -t 4 -c 8192
+ExecStart=$LLAMA_BIN -m $LLAMA_MODEL --host 0.0.0.0 --port 8080 -t 4 -c 16384
 Restart=on-failure
 RestartSec=5
 

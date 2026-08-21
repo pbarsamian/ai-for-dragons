@@ -223,6 +223,15 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
             except Exception as e:
                 stop.set()
                 spin.join()
+                err_str = str(e)
+                # Context window exceeded — trim old conversation turns and retry once
+                if "context" in err_str.lower() and round_num < 6:
+                    system_msgs = [m for m in history if isinstance(m, dict) and m.get("role") == "system"]
+                    other_msgs  = [m for m in history if not (isinstance(m, dict) and m.get("role") == "system")]
+                    # Keep the last 6 messages (3 turns) so recent tool results survive
+                    history = system_msgs + other_msgs[-6:]
+                    print(f"\n[context full — trimmed history to {len(history)} messages, retrying]\n")
+                    continue
                 print(f"\n[dragon-agent] llama-server error: {e}")
                 print("[dragon-agent] Is llama-server still running?")
                 break
