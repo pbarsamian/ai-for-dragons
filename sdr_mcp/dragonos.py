@@ -320,21 +320,79 @@ def _adsb_dump1090(duration_sec: int, dev_idx: int = 0, dev_serial: str = "") ->
             "install": "sudo apt install readsb",
         }, indent=2)
 
+    bin_name = os.path.basename(dump1090)
     tmpdir = tempfile.mkdtemp(prefix="dump1090_")
+    aircraft_file = os.path.join(tmpdir, "aircraft.json")
 
+    # readsb on DragonOS rejects --device-serial, --device-index, and treats
+    # --device <N> as an input type name rather than an RTL-SDR device index.
+    # Workaround: pipe rtl_sdr (which accepts -d <index|serial>) into readsb's
+    # ifile/stdin mode — the same pattern used by the UAT scanner.
+    rtl_sdr_bin = shutil.which("rtl_sdr")
+    if "readsb" in bin_name and rtl_sdr_bin:
+        # rtl_sdr -d accepts numeric index OR serial name string
+        rtl_dev = dev_serial if dev_serial else str(dev_idx)
+        rtlsdr_cmd = [rtl_sdr_bin, "-f", "1090000000", "-s", "2400000",
+                      "-g", "49.6", "-d", rtl_dev, "-"]
+        readsb_cmd = [dump1090, "--device", "ifile", "--ifile", "-",
+                      "--format", "UC8", "--quiet", "--net", "--write-json", tmpdir]
+
+        start = time.time()
+        aircraft: dict = {}
+        proc_rtl = subprocess.Popen(rtlsdr_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        proc_dump = subprocess.Popen(readsb_cmd, stdin=proc_rtl.stdout,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        proc_rtl.stdout.close()
+        try:
+            while time.time() - start < duration_sec:
+                if proc_dump.poll() is not None:
+                    err = (proc_dump.stderr.read() or "").strip()[:400]
+                    _shutil.rmtree(tmpdir, ignore_errors=True)
+                    return json.dumps({
+                        "status": "error",
+                        "message": "readsb (ifile mode) exited early.",
+                        "detail": err,
+                    }, indent=2)
+                if os.path.exists(aircraft_file):
+                    try:
+                        with open(aircraft_file) as f:
+                            data = json.load(f)
+                        for ac in data.get("aircraft", []):
+                            icao = ac.get("hex", "")
+                            if icao:
+                                aircraft[icao] = ac
+                        elapsed = int(time.time() - start)
+                        print(f"\n  [adsb +{elapsed}s] {len(aircraft)} aircraft (rtlsdr|readsb)", flush=True)
+                    except (json.JSONDecodeError, OSError):
+                        pass
+                time.sleep(2)
+        finally:
+            for p in (proc_rtl, proc_dump):
+                try:
+                    p.terminate()
+                    p.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+            _shutil.rmtree(tmpdir, ignore_errors=True)
+
+        return json.dumps({
+            "status": "complete",
+            "backend": "rtlsdr|readsb(ifile)",
+            "freq_mhz": 1090.0,
+            "duration_sec": duration_sec,
+            "aircraft_seen": len(aircraft),
+            "aircraft": list(aircraft.values())[:30],
+        }, indent=2)
+
+    # dump1090-fa and other variants: use standard device-selection flags
     cmd = [dump1090, "--quiet", "--net", "--write-json", tmpdir]
     if dev_serial:
-        # readsb and dump1090-fa both support --device-serial
         cmd += ["--device-serial", dev_serial]
     else:
-        # --device-index works for readsb and all dump1090 variants
-        # Note: readsb's --device flag is for input TYPE (modesbeast/ifile/etc), NOT index
         cmd += ["--device-index", str(dev_idx)]
 
-    aircraft_file = os.path.join(tmpdir, "aircraft.json")
     start = time.time()
     aircraft: dict = {}
-
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     try:
         while time.time() - start < duration_sec:
@@ -343,7 +401,7 @@ def _adsb_dump1090(duration_sec: int, dev_idx: int = 0, dev_serial: str = "") ->
                 _shutil.rmtree(tmpdir, ignore_errors=True)
                 return json.dumps({
                     "status": "error",
-                    "message": "readsb exited early — RTL-SDR may be busy or unplugged.",
+                    "message": "ADS-B decoder exited early — RTL-SDR may be busy or unplugged.",
                     "detail": err,
                 }, indent=2)
             if os.path.exists(aircraft_file):
@@ -355,7 +413,7 @@ def _adsb_dump1090(duration_sec: int, dev_idx: int = 0, dev_serial: str = "") ->
                         if icao:
                             aircraft[icao] = ac
                     elapsed = int(time.time() - start)
-                    print(f"\n  [adsb +{elapsed}s] {len(aircraft)} aircraft (dump1090/RTL-SDR)", flush=True)
+                    print(f"\n  [adsb +{elapsed}s] {len(aircraft)} aircraft ({bin_name})", flush=True)
                 except (json.JSONDecodeError, OSError):
                     pass
             time.sleep(2)
@@ -369,7 +427,7 @@ def _adsb_dump1090(duration_sec: int, dev_idx: int = 0, dev_serial: str = "") ->
 
     return json.dumps({
         "status": "complete",
-        "backend": "rtlsdr+dump1090",
+        "backend": f"rtlsdr+{bin_name}",
         "freq_mhz": 1090.0,
         "duration_sec": duration_sec,
         "aircraft_seen": len(aircraft),
