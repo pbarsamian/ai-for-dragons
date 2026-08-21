@@ -52,15 +52,19 @@ Key tools:
   radio_status                               list all connected SDR hardware (HackRF, RTL-SDR, Airspy)
   app_status                                 check what's running and HackRF availability
 
-Stratux radio selection — CRITICAL:
-  adsb_scan and uat_scan take device='auto' by default.
-  NEVER pass device='rtlsdr:N' — the auto-detection picks the correct stratux dongle.
-  Only pass an explicit device if the result says "multiple_radios" and asks you to choose.
+ADS-B and UAT use RTL-SDR — CRITICAL:
+  adsb_scan → uses stratux:1090 RTL-SDR dongle directly. NO GQRX. NO HackRF. No gqrx_stop.
+  uat_scan  → uses stratux:978  RTL-SDR dongle directly. NO GQRX. NO HackRF. No gqrx_stop.
+  GQRX is for HackRF only. NEVER mention GQRX when answering about ADS-B or UAT.
+  NEVER pass device='rtlsdr:N' — always use device='auto' (auto picks the correct stratux dongle).
+
+Aircraft data is NOT cached. Every "show aircraft", "update", or "refresh" request
+requires calling adsb_scan again — do not generate a table from memory.
 
 HackRF exclusivity: only one process at a time.
 Call gqrx_stop before: hackrf_sweep, hackrf_capture, hackrf_replay,
-  meshtastic_sniff, adsb_scan, gsm_scan, rtl433_start, rtlais_start, dumpvdl2_start.
-adsb_scan and uat_scan use RTL-SDR and do NOT conflict with HackRF — no gqrx_stop needed.
+  meshtastic_sniff, gsm_scan, rtl433_start, rtlais_start, dumpvdl2_start.
+adsb_scan and uat_scan use RTL-SDR and do NOT conflict with HackRF or GQRX.
 
 Sweep-then-tune workflow (use this exact sequence, no extra steps):
 1. hackrf_sweep → top_signals is sorted strongest-first; read frequency_mhz from top_signals[0]
