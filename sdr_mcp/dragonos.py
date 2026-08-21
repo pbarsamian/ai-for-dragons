@@ -119,10 +119,11 @@ def detect_radios() -> list[dict]:
     # RTL-SDR — try rtl_test first, then lsusb as fallback
     found.extend(_detect_rtlsdr())
 
-    # Airspy — airspy_info exits 0 when a device is attached
+    # Airspy — airspy_info prints "airspy" in its version text even with no device.
+    # Only count it as connected if a serial number appears in the output.
     if shutil.which("airspy_info"):
         rc, out, _ = _run(["airspy_info"], timeout=5)
-        if rc == 0 and "airspy" in out.lower():
+        if rc == 0 and "serial" in out.lower():
             found.append({
                 "type": "airspy",
                 "driver_flag": "--airspy",
