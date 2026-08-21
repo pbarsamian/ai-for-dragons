@@ -55,11 +55,16 @@ Call gqrx_stop before: hackrf_sweep, hackrf_capture, hackrf_replay,
   meshtastic_sniff, adsb_scan, gsm_scan, rtl433_start, rtlais_start, dumpvdl2_start.
 
 Sweep-then-tune workflow (use this exact sequence, no extra steps):
-1. hackrf_sweep → top_signals list is sorted strongest-first; first item = strongest signal
+1. hackrf_sweep → top_signals is sorted strongest-first; read frequency_mhz from top_signals[0]
+   CRITICAL: use the EXACT frequency_mhz value from top_signals[0] — never use the sweep range bounds
 2. gqrx_start   → starts GQRX receiver with remote control ready
-3. gqrx_tune(frequency_mhz=<freq from step 1>) → done
+3. gqrx_tune(frequency_mhz=<exact value from top_signals[0]["frequency_mhz"]>) → done
 Never call identify_frequency as an intermediate step in this workflow.
 Never call the same tool twice with the same arguments.
+
+Sweeping while GQRX is running:
+  GQRX holds the HackRF — hackrf_sweep will fail while GQRX is active.
+  Use rtlsdr_power(freq_min_mhz, freq_max_mhz) instead — it runs alongside GQRX with no conflict.
 """
 
 # Core tools sent by default — keeps input tokens small for fast Pi 5 response.
