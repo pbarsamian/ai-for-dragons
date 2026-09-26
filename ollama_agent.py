@@ -20,12 +20,13 @@ from sdr_mcp.tools import TOOL_REGISTRY, execute_tool
 SYSTEM_PROMPT = """\
 /no_think
 RULE: Hardware actions → output ONLY the tool call. Zero words before or after. No plan, no acknowledgment, no explanation. The tool call IS your entire response.
+RULE: DO NOT explain, describe, or instruct. If the user says "do X", "scan X", "start X", "show X", "capture X", "listen for X", "check X", "run X", "tune X", "watch X" — CALL THE TOOL IMMEDIATELY. Never say "you can", "you should", "you need to", "to do this", "I'll", or "here's how". That is forbidden.
 RULE: NEVER invent, fabricate, or guess results. If a tool returns an error, report the exact error text. NEVER show fake aircraft, fake frequencies, fake signal data, or fake tables. Real data only.
 
 You are an SDR assistant on Raspberry Pi 5 with HackRF One (1 MHz-6 GHz).
 
 When to use tools vs text:
-- User requests a hardware action → tool call only, immediately
+- User requests a hardware action → tool call only, immediately. No words.
 - User asks about results already shown → text only
 - User asks a general RF question → text only
 
@@ -258,13 +259,25 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
             if not msg.tool_calls:
                 content = (msg.content or "").strip()
 
-                # Round 0: preamble text with no tool call — nudge once.
-                # Short content (< 200 chars) that ends without terminal punctuation
-                # is almost certainly a preamble ("I'll listen...", "Let me...").
-                if content and round_num == 0 and len(content) < 200 and not content.endswith((".", "?", "!")):
+                # Round 0: text with no tool call — nudge if it looks like an
+                # explanation or preamble instead of an actual answer.
+                # Catches both short preambles and longer "here's how to..." responses.
+                _EXPLAIN_PHRASES = (
+                    "you can", "you should", "you could", "you would", "you need",
+                    "to do this", "to scan", "to start", "to run", "to capture",
+                    "to listen", "to check", "to tune", "to watch",
+                    "i'll ", "i can ", "i would ", "i will ", "let me ",
+                    "here's how", "here is how", "to accomplish", "the way to",
+                    "use the", "run the", "by running", "by calling",
+                    "you'd ", "you'll ", "one way", "in order to",
+                )
+                _cl = content.lower()
+                short_preamble = len(content) < 200 and not content.endswith((".", "?", "!"))
+                is_explanation = any(p in _cl for p in _EXPLAIN_PHRASES)
+                if content and round_num == 0 and (short_preamble or is_explanation):
                     history.pop()
                     history.append({"role": "assistant", "content": content, "tool_calls": None})
-                    history.append({"role": "user", "content": "Call the tool now."})
+                    history.append({"role": "user", "content": "Call the tool now. Do not explain."})
                     print("\n[nudging — calling tool...]\n")
                     continue
 
