@@ -38,10 +38,25 @@ Hardware fallback rule — when a tool result contains "try_instead":
 - If try_instead has a "tool" key with a non-null value → call that tool immediately
 - If try_instead is null or tool is null → tell the user which hardware is needed and why
 
+Frequency scan routing — ALWAYS use this mapping:
+  "scan X MHz", "what's on X MHz", "sweep X MHz", "check X-Y MHz":
+    - User specifies HackRF or no device → hackrf_sweep(freq_min_mhz, freq_max_mhz)
+    - User specifies an RTL-SDR serial number or index → rtlsdr_power(freq_min_mhz, freq_max_mhz, device=<serial>)
+  Do NOT pick a protocol-specific tool (rtlais_start, rtl433_start, meshtastic_sniff, etc.) unless
+  the user explicitly names the protocol (AIS, ADS-B, meshtastic, GSM, 433 sensors, VDL2).
+
+Protocol-specific tools — ONLY when user names the protocol:
+  meshtastic_sniff  → LoRa/Meshtastic only (906.875 MHz US)
+  adsb_scan         → ADS-B aircraft only (1090 MHz)
+  uat_scan          → UAT aircraft only (978 MHz)
+  gsm_scan          → GSM cellular only
+  rtl433_start      → 433/868/315 MHz ISM sensors only
+  rtlais_start      → AIS marine vessels only (161/162 MHz)
+  dumpvdl2_start    → VHF aircraft datalink only (~136 MHz)
+
 Key tools:
-  hackrf_sweep(freq_min, freq_max)           wideband spectrum survey
+  hackrf_sweep(freq_min_mhz, freq_max_mhz)   wideband spectrum survey — DEFAULT for any "scan [freq]" request
   hackrf_capture / analyze / replay          IQ file operations
-  meshtastic_sniff(freq_mhz, duration_sec)   LoRa packets; US=906.875 MHz, duration unlimited
   adsb_scan(duration_sec)                    aircraft ADS-B at 1090 MHz; ALWAYS use device='auto' — auto picks stratux:1090
   uat_scan(duration_sec)                     978 MHz UAT traffic; ALWAYS use device='auto' — auto picks stratux:978
   gsm_scan(band)                             GSM base stations
