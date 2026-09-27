@@ -162,9 +162,10 @@ def hackrf_sweep(
             )
         return f"hackrf_sweep failed:\n{err}"
 
-    # Parse CSV output → find top signals
-    # Split on comma and strip each field to handle both "a, b" and "a,b" formats
-    peaks = []
+    # Parse CSV output → find top signals.
+    # hackrf_sweep emits one CSV row per pass over each bin, so the same center
+    # frequency appears many times. Accumulate max power per center bucket, then sort.
+    bin_max: dict[float, float] = {}
     for line in out.splitlines():
         parts = [p.strip() for p in line.split(",")]
         if len(parts) < 7:  # date, time, hz_low, hz_high, step, n_samples, 1+ dBm
@@ -172,25 +173,33 @@ def hackrf_sweep(
         try:
             hz_low   = float(parts[2])
             hz_high  = float(parts[3])
-            center   = (hz_low + hz_high) / 2
+            center   = round((hz_low + hz_high) / 2 / 1e6, 3)
             dbm_vals = [float(x) for x in parts[6:] if x.strip()]
             if dbm_vals:
-                peaks.append((center / 1e6, max(dbm_vals)))
+                peak = max(dbm_vals)
+                if center not in bin_max or peak > bin_max[center]:
+                    bin_max[center] = peak
         except (ValueError, IndexError):
             continue
 
-    if not peaks:
+    if not bin_max:
         return (
             f"Sweep complete ({freq_min_mhz}–{freq_max_mhz} MHz) — no data parsed.\n"
             f"Raw output:\n{out[:500]}"
         )
 
-    peaks.sort(key=lambda x: x[1], reverse=True)
+    peaks = sorted(bin_max.items(), key=lambda x: x[1], reverse=True)
+
+    # Estimate noise floor as median power across all bins
+    all_powers = sorted(bin_max.values())
+    noise_floor = all_powers[len(all_powers) // 2] if all_powers else -60.0
+
     return json.dumps({
         "sweep_range_mhz": f"{freq_min_mhz}–{freq_max_mhz}",
         "bin_width_mhz": bin_width_hz / 1e6,
+        "noise_floor_dbm": round(noise_floor, 1),
         "top_signals": [
-            {"freq_mhz": round(f, 3), "power_dbm": round(p, 1)}
+            {"freq_mhz": f, "power_dbm": round(p, 1), "above_noise_db": round(p - noise_floor, 1)}
             for f, p in peaks[:10]
         ],
         "note": "Sweep uses HackRF directly. GQRX must be stopped or paused first.",

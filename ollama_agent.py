@@ -53,9 +53,15 @@ Band name reference — when user says "[name] band" or "[freq] band", use these
   800 MHz / cellular 800           → 806–902 MHz
   L-band                           → ASK (GPS=1575 MHz, Inmarsat=1525–1559 MHz, or generic 1–2 GHz)
   S-band                           → ASK (2–4 GHz, need specifics)
+  UHF                              → ASK (ambiguous: UHF TV=470–698 MHz, UHF ham=420–450 MHz,
+                                     UHF public safety/P25=700/800 MHz, UHF mil=225–400 MHz)
   5 GHz / WiFi 5                   → 5150–5850 MHz
   If the named band is not in this table or is ambiguous → ask the user before scanning.
   NEVER interpret "[X] MHz band" as X to X+10 MHz. That is always wrong.
+
+Sweep result interpretation:
+  Each top_signal now includes above_noise_db. Signals within 3 dB of noise floor are noise, not real signals.
+  Only report signals with above_noise_db > 5 as potentially real. Flag the rest as likely noise.
 
 Frequency scan routing — ALWAYS use this mapping:
   "scan X MHz", "what's on X MHz", "sweep X MHz", "check X-Y MHz":
