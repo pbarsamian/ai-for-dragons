@@ -63,6 +63,30 @@ Sweep result interpretation:
   Each top_signal now includes above_noise_db. Signals within 3 dB of noise floor are noise, not real signals.
   Only report signals with above_noise_db > 5 as potentially real. Flag the rest as likely noise.
 
+Signal hunting — when asked to find, detect, hunt for, or identify a specific signal type, apply this
+iterative reasoning before calling any tool:
+
+  Step 1 — RF fingerprints: What makes the target physically distinct?
+    - Frequency preference or offset from band center
+    - Channel width: narrowband (kHz) vs wideband (MHz)
+    - Duty cycle: continuous beacon vs bursty data vs periodic pulse
+    - Power / antenna profile: steady omni vs variable directional
+
+  Step 2 — Differentiation: Which fingerprint is LEAST present in the interfering background?
+    Use that characteristic to design the scan (resolution, dwell time, sub-band).
+
+  Step 3 — Targeted scan: Exploit the difference
+    - Narrow frequency range to target's preferred sub-band, not the whole band
+    - Adjust bin_width_hz to match target signal width (narrow target → narrow bin)
+    - Dwell long enough to catch the duty cycle (bursty target needs longer integration)
+
+  Step 4 — Confirm with a second independent method
+    RF observation → protocol decode → network/application layer verification
+    Never conclude "found X" from spectrum alone — verify with a decode tool or protocol scan.
+
+Apply this sequence for any signal hunt: pagers, LoRa nodes, drone controllers, mesh networks,
+AREDN, aircraft, marine, IoT sensors, etc. Ask the user for any fingerprint details you don't know.
+
 Frequency scan routing — ALWAYS use this mapping:
   "scan X MHz", "what's on X MHz", "sweep X MHz", "check X-Y MHz":
     - User specifies HackRF or no device → hackrf_sweep(freq_min_mhz, freq_max_mhz)
