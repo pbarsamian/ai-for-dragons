@@ -257,11 +257,31 @@ def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 60, device: 
                 ],
             }, indent=2)
     else:
-        # Accept friendly names ("RTL 1", "RTL 2", "RTL 3") by resolving to driver flag.
-        _NAME_TO_FLAG = {"rtl 1": "--rtlsdr", "rtl 2": "--rtlsdr", "rtl 3": "--rtlsdr",
-                         "rtl1": "--rtlsdr", "rtl2": "--rtlsdr", "rtl3": "--rtlsdr"}
+        # Resolve friendly names ("RTL 1/2/3", "sdr1/2/3") to --rtlsdr=INDEX using serial lookup.
+        _NAME_TO_SERIAL = {
+            "rtl 1": "00001111", "rtl1": "00001111", "sdr1": "00001111",
+            "rtl 2": "00002222", "rtl2": "00002222", "sdr2": "00002222",
+            "rtl 3": "00003333", "rtl3": "00003333", "sdr3": "00003333",
+        }
         base = device.strip().lower()
-        driver_flag = _NAME_TO_FLAG.get(base) or _DEVICE_FLAGS.get(base.split(":")[0], f"--{base.split(':')[0]}")
+        serial = _NAME_TO_SERIAL.get(base)
+        if serial:
+            from .rtlsdr import _resolve_device_index
+            idx = _resolve_device_index(serial)
+            if idx is None:
+                return json.dumps({
+                    "status": "error",
+                    "error": f"No RTL-SDR found with serial {serial} — is it connected?",
+                }, indent=2)
+            driver_flag = f"--rtlsdr={idx}"
+        elif base == "hackrf":
+            driver_flag = "--hackrf"
+        elif base == "airspy":
+            driver_flag = "--airspy"
+        elif base.startswith("rtlsdr:"):
+            driver_flag = f"--rtlsdr={base.split(':', 1)[1]}"
+        else:
+            driver_flag = _DEVICE_FLAGS.get(base.split(":")[0], f"--{base.split(':')[0]}")
 
     freq_hz = int(freq_mhz * 1e6)
     # meshtastic-sniffer (alphafox02) correct flags:
