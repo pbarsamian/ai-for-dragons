@@ -40,6 +40,23 @@ Hardware fallback rule — when a tool result contains "try_instead":
 - If try_instead has a "tool" key with a non-null value → call that tool immediately
 - If try_instead is null or tool is null → tell the user which hardware is needed and why
 
+Band name reference — when user says "[name] band" or "[freq] band", use these standard ranges:
+  900 MHz / ISM 915 / 915 MHz band → 902–928 MHz  (US ISM: LoRa, Meshtastic, Z-Wave, tire sensors)
+  433 MHz / ISM 433                → 433–435 MHz  (EU ISM: OOK remotes, LoRa, sensors)
+  2.4 GHz / ISM 2.4               → 2400–2484 MHz (ISM: WiFi, Bluetooth, ZigBee)
+                                     also 2390–2400 MHz (ham) — ASK if context is unclear
+  FM / FM band                     → 88–108 MHz
+  aviation / VHF air               → 108–137 MHz
+  2m / 2-meter / 144               → 144–148 MHz
+  marine / VHF marine              → 156–163 MHz
+  70cm / UHF ham                   → 420–450 MHz
+  800 MHz / cellular 800           → 806–902 MHz
+  L-band                           → ASK (GPS=1575 MHz, Inmarsat=1525–1559 MHz, or generic 1–2 GHz)
+  S-band                           → ASK (2–4 GHz, need specifics)
+  5 GHz / WiFi 5                   → 5150–5850 MHz
+  If the named band is not in this table or is ambiguous → ask the user before scanning.
+  NEVER interpret "[X] MHz band" as X to X+10 MHz. That is always wrong.
+
 Frequency scan routing — ALWAYS use this mapping:
   "scan X MHz", "what's on X MHz", "sweep X MHz", "check X-Y MHz":
     - User specifies HackRF or no device → hackrf_sweep(freq_min_mhz, freq_max_mhz)
