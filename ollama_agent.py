@@ -123,6 +123,12 @@ Key tools:
   rtl433_start / rtlais_start / dumpvdl2_start  ISM/AIS/VDL2 decoders
   rtlsdr_info / rtlsdr_capture / rtlsdr_power   RTL-SDR (RX only, 24-1766 MHz, runs alongside HackRF)
   interpret_adsb/ais/acars/pocsag/meshtastic decode captured frames
+    After meshtastic_sniff: call interpret_meshtastic for EACH packet in the result.
+    Packets with decrypted=true → interpret_meshtastic will decode payload type and content.
+    Packets with decrypted=false → interpret_meshtastic will explain the channel_hash and
+      report that a private key is needed — do NOT skip them or say "encrypted" without calling it.
+    SF11 / BW250 / LongFast = standard Meshtastic settings; sniffer already tries --keys=default.
+    If decrypted=false persists, nodes are on a private channel — report channel_hash and node IDs.
   explain_hex / signal_identify / identify_frequency  signal analysis
   gqrx_stop / gqrx_start / gqrx_tune / gqrx_status  GQRX receiver control
   radio_status                               list all connected SDR hardware (HackRF, RTL-SDR, Airspy)

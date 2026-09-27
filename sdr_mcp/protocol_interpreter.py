@@ -517,12 +517,42 @@ def interpret_meshtastic(packet_json: str) -> str:
     Explains node IDs, port numbers, hop counts, SNR, and message content.
     """
     try:
-        if isinstance(packet_json, str):
-            pkt = json.loads(packet_json)
+        if isinstance(packet_json, dict):
+            pkt = packet_json
+        elif isinstance(packet_json, str):
+            try:
+                pkt = json.loads(packet_json)
+            except json.JSONDecodeError:
+                # meshtastic-sniffer packets may arrive as Python repr (single-quote dicts)
+                # when passed through the agent tool layer — ast.literal_eval handles that.
+                import ast
+                pkt = ast.literal_eval(packet_json)
         else:
             pkt = packet_json
-    except json.JSONDecodeError as e:
-        return json.dumps({"error": f"JSON parse failed: {e}", "raw": packet_json}, indent=2)
+    except Exception as e:
+        return json.dumps({"error": f"Parse failed: {e}", "raw": str(packet_json)[:300]}, indent=2)
+
+    # If the packet wasn't decrypted by the sniffer, report clearly rather than
+    # pretending to interpret unreadable bytes.
+    if not pkt.get("decrypted", True) and "payload" not in pkt and "decoded" not in pkt:
+        channel_hash = pkt.get("channel_hash")
+        return json.dumps({
+            "status": "encrypted",
+            "from": pkt.get("from"),
+            "to": pkt.get("to"),
+            "channel_hash": channel_hash,
+            "note": (
+                f"Packet is on a private channel (hash={channel_hash}). "
+                "The default LongFast key could not decrypt it. "
+                "A channel-specific key is required to read the payload."
+            ),
+            "rf": {
+                "preset": pkt.get("preset"),
+                "sf": pkt.get("sf"),
+                "bw_hz": pkt.get("bw_hz"),
+                "snr_db": pkt.get("snr_db"),
+            },
+        }, indent=2)
 
     result = {}
 
