@@ -52,6 +52,7 @@ from .protocol_interpreter import (
     interpret_meshtastic,
     explain_hex,
     identify_frequency,
+    reverse_geocode,
 )
 from .dragonos import (
     detect_radios,
@@ -379,6 +380,10 @@ def _explain_hex(args: dict) -> str:
 
 def _identify_frequency(args: dict) -> str:
     return identify_frequency(float(args.get("freq_mhz", 0)))
+
+
+def _reverse_geocode(args: dict) -> str:
+    return reverse_geocode(float(args["lat"]), float(args["lon"]))
 
 
 # ── App manager wrappers ──────────────────────────────────────────────────
@@ -1058,6 +1063,22 @@ TOOL_REGISTRY: dict[str, dict] = {
             "required": ["freq_mhz"],
         },
         "fn": _identify_frequency,
+    },
+    "reverse_geocode": {
+        "description": (
+            "Look up the city, state, and country for a latitude/longitude coordinate pair "
+            "using OpenStreetMap Nominatim. ALWAYS use this tool when coordinates are available — "
+            "never guess or recall a location from memory."
+        ),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "lat": {"type": "number", "description": "Latitude in decimal degrees"},
+                "lon": {"type": "number", "description": "Longitude in decimal degrees"},
+            },
+            "required": ["lat", "lon"],
+        },
+        "fn": _reverse_geocode,
     },
 
     # HackRF (5)

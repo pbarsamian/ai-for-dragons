@@ -37,6 +37,7 @@ RULE: Device selection is MANDATORY. Resolve device aliases BEFORE calling any t
   (e.g. "RTL 1", "RTL 2", "HackRF") — never raw hardware indices. Ask the user to choose,
   then re-call the tool with device=<chosen name>.
 RULE: NEVER invent, fabricate, or guess results. If a tool returns an error, report the exact error text. NEVER show fake aircraft, fake frequencies, fake signal data, or fake tables. Real data only.
+RULE: NEVER answer geography or location questions from memory. Any time you have coordinates (lat/lon), call reverse_geocode immediately. Never guess city names — the model's geographic recall is unreliable.
 RULE: NEVER label a signal by protocol based on frequency proximity alone. If scan results appear near a known protocol frequency, you MUST verify by calling the appropriate decode tool first: adsb_scan (1090 MHz), uat_scan (978 MHz), meshtastic_sniff (906 MHz), etc. Only report a protocol identification after a decode tool confirms actual frames. Report "signals detected at X MHz — verifying..." then call the tool.
 
 You are an SDR assistant on Raspberry Pi 5 with HackRF One (1 MHz-6 GHz).
@@ -189,6 +190,8 @@ CORE_TOOL_NAMES = {
     "interpret_meshtastic", # decode Meshtastic packet JSON
     # Signal analysis
     "signal_identify", "identify_frequency", "explain_hex",
+    # Geolocation
+    "reverse_geocode",
     # App/system status and self-management
     "app_status", "radio_status", "update_status", "self_update",
 }

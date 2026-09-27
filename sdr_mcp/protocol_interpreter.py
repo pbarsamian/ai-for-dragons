@@ -769,3 +769,40 @@ def identify_frequency(freq_mhz: float) -> str:
         result["suggested_tools"] = tools
 
     return json.dumps(result, indent=2)
+
+
+def reverse_geocode(lat: float, lon: float) -> str:
+    """
+    Look up the human-readable location for a latitude/longitude pair using
+    the Nominatim OpenStreetMap API (no key required, free).
+    Returns city, county, state, country, and a display name.
+    """
+    import urllib.request
+    import urllib.parse
+
+    params = urllib.parse.urlencode({
+        "lat": lat,
+        "lon": lon,
+        "format": "json",
+        "zoom": 10,
+    })
+    url = f"https://nominatim.openstreetmap.org/reverse?{params}"
+    req = urllib.request.Request(url, headers={"User-Agent": "ai-for-dragons/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e), "lat": lat, "lon": lon}, indent=2)
+
+    addr = data.get("address", {})
+    return json.dumps({
+        "status": "ok",
+        "lat": lat,
+        "lon": lon,
+        "display_name": data.get("display_name"),
+        "city": addr.get("city") or addr.get("town") or addr.get("village") or addr.get("hamlet"),
+        "county": addr.get("county"),
+        "state": addr.get("state"),
+        "country": addr.get("country"),
+        "postcode": addr.get("postcode"),
+    }, indent=2)
