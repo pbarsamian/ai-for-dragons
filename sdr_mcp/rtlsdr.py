@@ -30,21 +30,34 @@ def _run(cmd: list[str], timeout: int = 30) -> tuple[int, str, str]:
 
 
 def _resolve_device_index(device_serial: str) -> int | None:
-    """Return the device index for a given serial number string, or None if not found."""
+    """Return the device index for a given serial number string, or None if not found.
+
+    Matches exact serial first, then falls back to comparing with leading zeros stripped
+    so that "3333" matches a device reported as "00003333" and vice-versa.
+    """
     rc, out, err = _run(["rtl_test", "-t"], timeout=10)
     combined = out + err
+    needle = device_serial.lstrip("0") or "0"
+    candidates: list[tuple[int, str]] = []
     for line in combined.splitlines():
         stripped = line.strip()
-        # Lines look like: "  0:  Realtek, RTL2838UHIDIR, SN: 3333"
+        # Lines look like: "  0:  Realtek, RTL2838UHIDIR, SN: 00003333"
         if not stripped or not stripped[0].isdigit() or "SN:" not in stripped:
             continue
         try:
             idx = int(stripped.split(":")[0].strip())
             sn = stripped.split("SN:")[-1].strip()
-            if sn == device_serial:
-                return idx
+            candidates.append((idx, sn))
         except (ValueError, IndexError):
             pass
+    # Exact match first
+    for idx, sn in candidates:
+        if sn == device_serial:
+            return idx
+    # Stripped-zero fallback
+    for idx, sn in candidates:
+        if (sn.lstrip("0") or "0") == needle:
+            return idx
     return None
 
 
