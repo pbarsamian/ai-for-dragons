@@ -196,7 +196,9 @@ def rtlsdr_power(
 
         rc, out, err = _run(cmd, timeout=integration_sec + 20)
 
-        signals = []
+        # rtl_power writes one row per integration interval, so the same frequency
+        # bin appears multiple times. Accumulate max power per bin across all rows.
+        bin_max: dict[float, float] = {}
         try:
             with open(tmpfile, "r") as f:
                 for line in f:
@@ -212,13 +214,15 @@ def rtlsdr_power(
                         freq_step = float(parts[4])
                         power_values = [float(x) for x in parts[6:] if x.strip()]
                         for i, pwr in enumerate(power_values):
-                            freq_hz = freq_low + i * freq_step
-                            signals.append({"freq_mhz": round(freq_hz / 1e6, 4), "power_db": round(pwr, 1)})
+                            freq_mhz = round((freq_low + i * freq_step) / 1e6, 4)
+                            if freq_mhz not in bin_max or pwr > bin_max[freq_mhz]:
+                                bin_max[freq_mhz] = pwr
                     except (ValueError, IndexError):
                         pass
         except OSError:
             pass
 
+        signals = [{"freq_mhz": f, "power_db": round(p, 1)} for f, p in bin_max.items()]
         signals.sort(key=lambda s: s["power_db"], reverse=True)
 
         return json.dumps({
