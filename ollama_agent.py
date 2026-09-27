@@ -41,7 +41,8 @@ Hardware fallback rule — when a tool result contains "try_instead":
 Frequency scan routing — ALWAYS use this mapping:
   "scan X MHz", "what's on X MHz", "sweep X MHz", "check X-Y MHz":
     - User specifies HackRF or no device → hackrf_sweep(freq_min_mhz, freq_max_mhz)
-    - User specifies an RTL-SDR serial number or index → rtlsdr_power(freq_min_mhz, freq_max_mhz, device=<serial>)
+    - User specifies an RTL-SDR serial number → rtlsdr_power(freq_min_mhz, freq_max_mhz, device_serial="<serial>")
+    - User specifies an RTL-SDR device index  → rtlsdr_power(freq_min_mhz, freq_max_mhz, device_index=<index>)
   Do NOT pick a protocol-specific tool (rtlais_start, rtl433_start, meshtastic_sniff, etc.) unless
   the user explicitly names the protocol (AIS, ADS-B, meshtastic, GSM, 433 sensors, VDL2).
 

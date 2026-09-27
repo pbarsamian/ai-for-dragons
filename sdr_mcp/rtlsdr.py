@@ -29,6 +29,25 @@ def _run(cmd: list[str], timeout: int = 30) -> tuple[int, str, str]:
         return -1, "", f"Command timed out after {timeout}s"
 
 
+def _resolve_device_index(device_serial: str) -> int | None:
+    """Return the device index for a given serial number string, or None if not found."""
+    rc, out, err = _run(["rtl_test", "-t"], timeout=10)
+    combined = out + err
+    for line in combined.splitlines():
+        stripped = line.strip()
+        # Lines look like: "  0:  Realtek, RTL2838UHIDIR, SN: 3333"
+        if not stripped or not stripped[0].isdigit() or "SN:" not in stripped:
+            continue
+        try:
+            idx = int(stripped.split(":")[0].strip())
+            sn = stripped.split("SN:")[-1].strip()
+            if sn == device_serial:
+                return idx
+        except (ValueError, IndexError):
+            pass
+    return None
+
+
 def rtlsdr_info(device_index=None) -> str:
     if not shutil.which("rtl_test"):
         return json.dumps({
@@ -75,9 +94,19 @@ def rtlsdr_capture(
     freq_mhz: float,
     duration_sec: int = 10,
     device_index: int = 0,
+    device_serial: str | None = None,
     sample_rate_msps: float = 2.048,
     output_path: str | None = None,
 ) -> str:
+    if device_serial is not None:
+        resolved = _resolve_device_index(device_serial)
+        if resolved is None:
+            return json.dumps({
+                "status": "error",
+                "error": f"No RTL-SDR device found with serial '{device_serial}'",
+            }, indent=2)
+        device_index = resolved
+
     if not shutil.which("rtl_sdr"):
         return json.dumps({
             "status": "not_found",
@@ -131,8 +160,18 @@ def rtlsdr_power(
     freq_min_mhz: float,
     freq_max_mhz: float,
     device_index: int = 0,
+    device_serial: str | None = None,
     integration_sec: int = 10,
 ) -> str:
+    if device_serial is not None:
+        resolved = _resolve_device_index(device_serial)
+        if resolved is None:
+            return json.dumps({
+                "status": "error",
+                "error": f"No RTL-SDR device found with serial '{device_serial}'",
+            }, indent=2)
+        device_index = resolved
+
     if not shutil.which("rtl_power"):
         return json.dumps({
             "status": "not_found",

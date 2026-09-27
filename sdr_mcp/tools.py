@@ -468,6 +468,7 @@ def _rtlsdr_capture(args: dict) -> str:
         freq_mhz=float(args["freq_mhz"]),
         duration_sec=int(args.get("duration_sec", 10)),
         device_index=int(args.get("device_index", 0)),
+        device_serial=args.get("device_serial"),
         sample_rate_msps=float(args.get("sample_rate_msps", 2.048)),
         output_path=args.get("output_path"),
     )
@@ -478,6 +479,7 @@ def _rtlsdr_power(args: dict) -> str:
         freq_min_mhz=float(args["freq_min_mhz"]),
         freq_max_mhz=float(args["freq_max_mhz"]),
         device_index=int(args.get("device_index", 0)),
+        device_serial=args.get("device_serial"),
         integration_sec=int(args.get("integration_sec", 10)),
     )
 
@@ -921,13 +923,14 @@ TOOL_REGISTRY: dict[str, dict] = {
         "fn": _rtlsdr_info,
     },
     "rtlsdr_capture": {
-        "description": "Capture raw IQ data from an RTL-SDR device (receive only, 24-1766 MHz). Can run simultaneously with HackRF. Use device_index to select which RTL-SDR.",
+        "description": "Capture raw IQ data from an RTL-SDR device (receive only, 24-1766 MHz). Can run simultaneously with HackRF. Use device_serial to select by serial number, or device_index to select by index.",
         "schema": {
             "type": "object",
             "properties": {
                 "freq_mhz": {"type": "number", "description": "Center frequency in MHz (24-1766)"},
                 "duration_sec": {"type": "integer", "description": "Capture duration in seconds (default 10)"},
-                "device_index": {"type": "integer", "description": "RTL-SDR device index (default 0)"},
+                "device_serial": {"type": "string", "description": "RTL-SDR serial number (preferred over device_index when user specifies a serial)"},
+                "device_index": {"type": "integer", "description": "RTL-SDR device index (default 0). Use device_serial instead when the user gives a serial number."},
                 "sample_rate_msps": {"type": "number", "description": "Sample rate in MSPS (default 2.048, max ~2.8)"},
                 "output_path": {"type": "string", "description": "Output file path (default auto-named in ~/sdr-captures/)"},
             },
@@ -936,13 +939,14 @@ TOOL_REGISTRY: dict[str, dict] = {
         "fn": _rtlsdr_capture,
     },
     "rtlsdr_power": {
-        "description": "Frequency power survey across a range using RTL-SDR (equivalent of hackrf_sweep but for RTL-SDR). Can run simultaneously with HackRF. Returns top signals by power.",
+        "description": "Frequency power survey across a range using RTL-SDR (equivalent of hackrf_sweep but for RTL-SDR). Can run simultaneously with HackRF. Use device_serial to select by serial number, or device_index to select by index.",
         "schema": {
             "type": "object",
             "properties": {
                 "freq_min_mhz": {"type": "number", "description": "Start frequency in MHz"},
                 "freq_max_mhz": {"type": "number", "description": "End frequency in MHz"},
-                "device_index": {"type": "integer", "description": "RTL-SDR device index (default 0)"},
+                "device_serial": {"type": "string", "description": "RTL-SDR serial number (preferred over device_index when user specifies a serial)"},
+                "device_index": {"type": "integer", "description": "RTL-SDR device index (default 0). Use device_serial instead when the user gives a serial number."},
                 "integration_sec": {"type": "integer", "description": "Integration time in seconds (default 10)"},
             },
             "required": ["freq_min_mhz", "freq_max_mhz"],
