@@ -22,13 +22,17 @@ SYSTEM_PROMPT = """\
 RULE: Hardware actions → output ONLY the tool call. Zero words before or after. No plan, no acknowledgment, no explanation. The tool call IS your entire response.
 RULE: DO NOT explain, describe, or instruct. If the user says "do X", "scan X", "start X", "show X", "capture X", "listen for X", "check X", "run X", "tune X", "watch X" — CALL THE TOOL IMMEDIATELY. Never say "you can", "you should", "you need to", "to do this", "I'll", or "here's how". That is forbidden.
 RULE: Device selection is MANDATORY. Resolve device aliases BEFORE calling any tool:
-  "RTL 1" / "RTL-SDR 1" / "SDR 1" / "1" / "1111"   → device_serial="00001111"
-  "RTL 2" / "RTL-SDR 2" / "SDR 2" / "2" / "2222"   → device_serial="00002222"
-  "RTL 3" / "RTL-SDR 3" / "SDR 3" / "3" / "3333"   → device_serial="00003333"
-  "HackRF"                                            → hackrf_* tools only, NEVER rtlsdr_*
-  "stratux"                                           → device='auto' in adsb_scan / uat_scan only
+  "RTL 1" / "RTL-SDR 1" / "SDR 1" / "sdr1" / "1" / "1111"   → device_serial="00001111" (rtlsdr_power/rtlsdr_capture)
+                                                               → device="RTL 1"          (meshtastic_sniff)
+  "RTL 2" / "RTL-SDR 2" / "SDR 2" / "sdr2" / "2" / "2222"   → device_serial="00002222" (rtlsdr_power/rtlsdr_capture)
+                                                               → device="RTL 2"          (meshtastic_sniff)
+  "RTL 3" / "RTL-SDR 3" / "SDR 3" / "sdr3" / "3" / "3333"   → device_serial="00003333" (rtlsdr_power/rtlsdr_capture)
+                                                               → device="RTL 3"          (meshtastic_sniff)
+  "HackRF"                                                     → hackrf_* tools only; device="hackrf" for meshtastic_sniff
+  "stratux"                                                    → device='auto' in adsb_scan / uat_scan only
   Any bare serial number (e.g. "00003333", "sdr 3333") → device_serial="<that number>"
   NEVER call hackrf_sweep when a serial number or RTL alias is given.
+  NEVER pass device="auto" to meshtastic_sniff when the user already named a device.
   When a tool returns status="multiple_radios", present the "name" field from each device entry
   (e.g. "RTL 1", "RTL 2", "HackRF") — never raw hardware indices. Ask the user to choose,
   then re-call the tool with device=<chosen name>.
@@ -435,6 +439,25 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                     "content": result,
                     "tool_call_id": tc.id,
                 })
+
+                # If the tool returned multiple_radios, force the model to stop and
+                # ask the user — never let it retry the same tool with a malformed device.
+                try:
+                    _r = json.loads(result) if isinstance(result, str) else result
+                    if isinstance(_r, dict) and _r.get("status") == "multiple_radios":
+                        devices = _r.get("devices", [])
+                        names = ", ".join(d.get("name", d.get("id", "?")) for d in devices)
+                        history.append({
+                            "role": "user",
+                            "content": (
+                                f"The tool found multiple devices: {names}. "
+                                "Ask the user which one to use. "
+                                "Do NOT call any tool until the user replies."
+                            ),
+                        })
+                        print(f"\n[multiple_radios — asking user: {names}]\n")
+                except Exception:
+                    pass
 
                 # Detect repeated tool calls — break the loop before it spirals.
                 # Triggers when the same tool appears twice regardless of args,
