@@ -218,6 +218,16 @@ def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 60, device: 
         }, indent=2)
 
     # ── Resolve which SDR to use ──────────────────────────────────────────
+    _SERIAL_NAMES = {"00001111": "RTL 1", "00002222": "RTL 2", "00003333": "RTL 3"}
+
+    def _friendly(r: dict) -> str:
+        desc = r.get("description", "")
+        if "SN:" in desc:
+            sn = desc.split("SN:")[-1].strip()
+            if sn in _SERIAL_NAMES:
+                return _SERIAL_NAMES[sn]
+        return "HackRF" if r.get("type") == "hackrf" else r.get("type", "unknown")
+
     if device == "auto":
         radios = detect_radios()
         if not radios:
@@ -225,20 +235,33 @@ def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 60, device: 
                 "status": "no_radio",
                 "message": "No SDR device detected. Check USB connections and try again.",
             }, indent=2)
-        if len(radios) > 1:
+
+        # Stratux radios are reserved for ADS-B/UAT — exclude from general-purpose tools.
+        general = [r for r in radios if "stratux" not in r.get("description", "").lower()]
+        if not general:
+            return json.dumps({
+                "status": "no_radio",
+                "message": "Only stratux ADS-B radios detected — reserved for ADS-B/UAT. Connect a general-purpose SDR.",
+            }, indent=2)
+
+        if len(general) == 1:
+            driver_flag = general[0]["driver_flag"]
+            print(f"\n  [auto] Using {_friendly(general[0])}", flush=True)
+        else:
             return json.dumps({
                 "status": "multiple_radios",
-                "message": (
-                    "Multiple SDR devices found. Re-call meshtastic_sniff with "
-                    "device= set to your choice (e.g. 'hackrf', 'rtlsdr')."
-                ),
-                "devices": [{"id": r["type"], "description": r["description"]} for r in radios],
+                "message": "Multiple SDR devices available. Which would you like to use?",
+                "devices": [
+                    {"name": _friendly(r), "description": r["description"]}
+                    for r in general
+                ],
             }, indent=2)
-        driver_flag = radios[0]["driver_flag"]
-        print(f"\n  [auto] Using {radios[0]['description']}", flush=True)
     else:
-        base = device.split(":")[0].lower()
-        driver_flag = _DEVICE_FLAGS.get(base, f"--{base}")
+        # Accept friendly names ("RTL 1", "RTL 2", "RTL 3") by resolving to driver flag.
+        _NAME_TO_FLAG = {"rtl 1": "--rtlsdr", "rtl 2": "--rtlsdr", "rtl 3": "--rtlsdr",
+                         "rtl1": "--rtlsdr", "rtl2": "--rtlsdr", "rtl3": "--rtlsdr"}
+        base = device.strip().lower()
+        driver_flag = _NAME_TO_FLAG.get(base) or _DEVICE_FLAGS.get(base.split(":")[0], f"--{base.split(':')[0]}")
 
     freq_hz = int(freq_mhz * 1e6)
     # meshtastic-sniffer (alphafox02) correct flags:
