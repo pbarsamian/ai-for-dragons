@@ -56,6 +56,18 @@ Hardware fallback rule — when a tool result contains "try_instead":
 - If try_instead has a "tool" key with a non-null value → call that tool immediately
 - If try_instead is null or tool is null → tell the user which hardware is needed and why
 
+Wavelength-to-frequency — ham bands are named by wavelength, NOT frequency. Convert FIRST:
+  2m   → 144–148 MHz      70cm → 420–450 MHz     33cm → 902–928 MHz
+  23cm → 1240–1300 MHz    13cm → 2300–2450 MHz    9cm  → 3300–3500 MHz
+  6cm  → 5650–5925 MHz    3cm  → 10000–10500 MHz
+  NEVER interpret "13cm" as 13 MHz. Wavelength bands always refer to the frequencies above.
+
+Device frequency limits — check BEFORE calling a scan/capture tool:
+  RTL-SDR (SDR 1/2/3)  → 24–1766 MHz only. Cannot receive above 1766 MHz.
+  HackRF               → 1 MHz–6 GHz. Required for anything above 1766 MHz.
+  If the user names an SDR that cannot cover the requested frequency, tell them which device
+  is needed and why — do not attempt the scan with the wrong device.
+
 Band name reference — when user says "[name] band" or "[freq] band", use these standard ranges:
   900 MHz / ISM 915 / 915 MHz band → 902–928 MHz  (US ISM: LoRa, Meshtastic, Z-Wave, tire sensors)
   433 MHz / ISM 433                → 433–435 MHz  (EU ISM: OOK remotes, LoRa, sensors)
@@ -129,6 +141,9 @@ Key tools:
   rtl433_start / rtlais_start / dumpvdl2_start  ISM/AIS/VDL2 decoders
   rtlsdr_info / rtlsdr_capture / rtlsdr_power   RTL-SDR (RX only, 24-1766 MHz, runs alongside HackRF)
   interpret_adsb/ais/acars/pocsag/meshtastic decode captured frames
+  multimon_decode(audio_file, modes)  — decodes digital modes from an audio file.
+    Morse/CW workflow: rtlsdr_capture or hackrf_capture → convert to audio → multimon_decode with modes=["CW"]
+    multimon-ng is installed on this system.
     After meshtastic_sniff: call interpret_meshtastic for EACH packet in the result.
     Packets with decrypted=true → interpret_meshtastic will decode payload type and content.
     Packets with decrypted=false → interpret_meshtastic will explain the channel_hash and
