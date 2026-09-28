@@ -37,7 +37,9 @@ RULE: Device selection is MANDATORY. Resolve device aliases BEFORE calling any t
   (e.g. "RTL 1", "RTL 2", "HackRF") — never raw hardware indices. Ask the user to choose,
   then re-call the tool with device=<chosen name>.
 RULE: NEVER invent, fabricate, or guess results. If a tool returns an error, report the exact error text. NEVER show fake aircraft, fake frequencies, fake signal data, or fake tables. Real data only.
-RULE: Convert time expressions to seconds before calling any tool — "1 hour"=3600, "30 minutes"=1800, "3 minutes"=180, "90 seconds"=90. Never use a tool's default duration when the user stated a duration.
+RULE: Convert time expressions to seconds before calling any tool — minutes×60, hours×3600.
+  Examples: "1 hour"=3600, "60 minutes"=3600, "30 minutes"=1800, "90 minutes"=5400, "3 minutes"=180, "90 seconds"=90.
+  NEVER pass the number of minutes directly as duration_sec. "60 minutes" is NOT 60 — it is 3600.
 RULE: NEVER answer geography or location questions from memory. Any time you have coordinates (lat/lon), call reverse_geocode immediately. Never guess city names — the model's geographic recall is unreliable.
 RULE: NEVER label a signal by protocol based on frequency proximity alone. If scan results appear near a known protocol frequency, you MUST verify by calling the appropriate decode tool first: adsb_scan (1090 MHz), uat_scan (978 MHz), meshtastic_sniff (906 MHz), etc. Only report a protocol identification after a decode tool confirms actual frames. Report "signals detected at X MHz — verifying..." then call the tool.
 
@@ -433,6 +435,7 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                 break
 
             # Execute tool calls
+            _needs_user_input = False
             for tc in msg.tool_calls:
                 tool_name = tc.function.name
                 tool_args = tc.function.arguments or {}
@@ -476,7 +479,7 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                 })
 
                 # If the tool returned multiple_radios, force the model to stop and
-                # ask the user — never let it retry the same tool with a malformed device.
+                # ask the user — never let it retry the same tool.
                 try:
                     _r = json.loads(result) if isinstance(result, str) else result
                     if isinstance(_r, dict) and _r.get("status") == "multiple_radios":
@@ -491,6 +494,8 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                             ),
                         })
                         print(f"\n[multiple_radios — asking user: {names}]\n")
+                        _needs_user_input = True
+                        break  # stop processing remaining tool calls
                 except Exception:
                     pass
 
@@ -509,6 +514,9 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                     })
                     print(f"\n[loop-break: {tool_name} repeated — redirecting]\n")
                 recent_call_sigs.append(sig)
+
+            if _needs_user_input:
+                break  # break out of the rounds loop — wait for user to choose device
 
 
 def watch_loop(model: str, freq_min: float, freq_max: float, interval_sec: int, all_tools: bool = False) -> None:
