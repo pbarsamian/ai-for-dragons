@@ -50,6 +50,7 @@ from .protocol_interpreter import (
     interpret_acars,
     interpret_pocsag,
     interpret_meshtastic,
+    meshtastic_table,
     explain_hex,
     identify_frequency,
     reverse_geocode,
@@ -374,6 +375,9 @@ def _interpret_pocsag(args: dict) -> str:
 
 def _interpret_meshtastic(args: dict) -> str:
     return interpret_meshtastic(args.get("packet_json", "{}"))
+
+def _meshtastic_table(args: dict) -> str:
+    return meshtastic_table(args.get("sniff_result", "[]"))
 
 def _explain_hex(args: dict) -> str:
     return explain_hex(args.get("hex_data", ""), args.get("protocol_hint", ""))
@@ -1040,6 +1044,27 @@ TOOL_REGISTRY: dict[str, dict] = {
             "required": ["packet_json"],
         },
         "fn": _interpret_meshtastic,
+    },
+    "meshtastic_table": {
+        "description": (
+            "Build a channel-organized table from meshtastic_sniff output. "
+            "Pass the full JSON result from meshtastic_sniff. "
+            "Returns rows grouped by channel — each row has source node ID, hops, timestamp, "
+            "port/application, message, GPS coordinates, geocoded city/location, and SNR. "
+            "GPS coordinates are automatically reverse-geocoded to city names. "
+            "Use this INSTEAD of calling interpret_meshtastic for each packet individually."
+        ),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "sniff_result": {
+                    "type": "string",
+                    "description": "Full JSON string returned by meshtastic_sniff, or a bare JSON array of packets",
+                },
+            },
+            "required": ["sniff_result"],
+        },
+        "fn": _meshtastic_table,
     },
     "explain_hex": {
         "description": "Explain a raw hex string — auto-detects protocol (ADS-B, AIS) or returns byte-by-byte breakdown with ASCII. Useful for unknown protocols.",

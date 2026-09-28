@@ -57,10 +57,16 @@ Hardware fallback rule — when a tool result contains "try_instead":
 - If try_instead is null or tool is null → tell the user which hardware is needed and why
 
 Wavelength-to-frequency — ham bands are named by wavelength, NOT frequency. Convert FIRST:
-  2m   → 144–148 MHz      70cm → 420–450 MHz     33cm → 902–928 MHz
-  23cm → 1240–1300 MHz    13cm → 2300–2450 MHz    9cm  → 3300–3500 MHz
+  160m → 1.8–2 MHz        80m  → 3.5–4 MHz        40m  → 7–7.3 MHz
+  30m  → 10.1–10.15 MHz   20m  → 14–14.35 MHz      17m  → 18.068–18.168 MHz
+  15m  → 21–21.45 MHz     12m  → 24.89–24.99 MHz   10m  → 28–29.7 MHz
+  6m   → 50–54 MHz        2m   → 144–148 MHz        1.25m / 222 MHz → 222–225 MHz
+  70cm → 420–450 MHz      33cm → 902–928 MHz        23cm → 1240–1300 MHz
+  14cm → 1900–2300 MHz    13cm → 2300–2450 MHz      9cm  → 3300–3500 MHz
   6cm  → 5650–5925 MHz    3cm  → 10000–10500 MHz
-  NEVER interpret "13cm" as 13 MHz. Wavelength bands always refer to the frequencies above.
+  NEVER interpret any [N]cm or [N]m band as N MHz or N GHz — that is always wrong.
+  A wavelength of Ncm → ~(30000/N) MHz. A wavelength of Nm → ~(300/N) MHz.
+  If unsure of an exact wavelength allocation, call identify_frequency((30000/N)) to look it up.
 
 Device frequency limits — check BEFORE calling a scan/capture tool:
   RTL-SDR (SDR 1/2/3)  → 24–1766 MHz only. Cannot receive above 1766 MHz.
@@ -69,6 +75,11 @@ Device frequency limits — check BEFORE calling a scan/capture tool:
   is needed and why — do not attempt the scan with the wrong device.
 
 Band name reference — when user says "[name] band" or "[freq] band", use these standard ranges:
+  ham / amateur / ham radio        → ASK — many allocations exist; list choices and ask:
+                                     HF: 160m 80m 40m 20m 15m 10m 6m
+                                     VHF/UHF: 2m (144 MHz), 1.25m (222 MHz), 70cm (420 MHz)
+                                     Microwave: 33cm (902 MHz), 23cm (1240 MHz), 13cm (2300 MHz)
+                                     and higher. Ask which band or frequency range.
   900 MHz / ISM 915 / 915 MHz band → 902–928 MHz  (US ISM: LoRa, Meshtastic, Z-Wave, tire sensors)
   433 MHz / ISM 433                → 433–435 MHz  (EU ISM: OOK remotes, LoRa, sensors)
   2.4 GHz / ISM 2.4               → 2400–2484 MHz (ISM: WiFi, Bluetooth, ZigBee)
@@ -76,6 +87,7 @@ Band name reference — when user says "[name] band" or "[freq] band", use these
   FM / FM band                     → 88–108 MHz
   aviation / VHF air               → 108–137 MHz
   2m / 2-meter / 144               → 144–148 MHz
+  1.25m / 222 / 220 MHz            → 222–225 MHz
   marine / VHF marine              → 156–163 MHz
   70cm / UHF ham                   → 420–450 MHz
   800 MHz / cellular 800           → 806–902 MHz
@@ -144,12 +156,15 @@ Key tools:
   multimon_decode(audio_file, modes)  — decodes digital modes from an audio file.
     Morse/CW workflow: rtlsdr_capture or hackrf_capture → convert to audio → multimon_decode with modes=["CW"]
     multimon-ng is installed on this system.
-    After meshtastic_sniff: call interpret_meshtastic for EACH packet in the result.
-    Packets with decrypted=true → interpret_meshtastic will decode payload type and content.
-    Packets with decrypted=false → interpret_meshtastic will explain the channel_hash and
-      report that a private key is needed — do NOT skip them or say "encrypted" without calling it.
+    After meshtastic_sniff: call meshtastic_table(sniff_result=<full JSON result from sniff>) ONCE.
+    meshtastic_table enriches all packets in one call: geocodes GPS coordinates, groups by channel,
+    and returns rows with source, hops, timestamp, port, message, and location (city name).
+    After meshtastic_table returns, format results as a markdown table per channel:
+      Columns: Source | Hops | Time | Port | Message | Location | SNR
+    If meshtastic_table returns status="no_packets", report duration_actual_sec and that no packets were heard.
+    Report duration_actual_sec (not duration_requested_sec) as the actual listen time.
     SF11 / BW250 / LongFast = standard Meshtastic settings; sniffer already tries --keys=default.
-    If decrypted=false persists, nodes are on a private channel — report channel_hash and node IDs.
+    If no packets decoded, nodes may be on a private channel or out of range.
   explain_hex / signal_identify / identify_frequency  signal analysis
   gqrx_stop / gqrx_start / gqrx_tune / gqrx_status  GQRX receiver control
   radio_status                               list all connected SDR hardware (HackRF, RTL-SDR, Airspy)
@@ -203,7 +218,8 @@ CORE_TOOL_NAMES = {
     "interpret_ais",        # decode NMEA AIS sentence
     "interpret_acars",      # decode ACARS aircraft message
     "interpret_pocsag",     # decode POCSAG pager line from multimon-ng
-    "interpret_meshtastic", # decode Meshtastic packet JSON
+    "interpret_meshtastic", # decode a single Meshtastic packet JSON
+    "meshtastic_table",     # enrich + geocode all packets from meshtastic_sniff, group by channel
     # Signal analysis
     "signal_identify", "identify_frequency", "explain_hex",
     # Geolocation

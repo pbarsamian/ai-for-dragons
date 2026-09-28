@@ -806,3 +806,132 @@ def reverse_geocode(lat: float, lon: float) -> str:
         "country": addr.get("country"),
         "postcode": addr.get("postcode"),
     }, indent=2)
+
+
+def meshtastic_table(sniff_result: str) -> str:
+    """
+    Build a channel-organized table from meshtastic_sniff output.
+    Interprets each packet, reverse-geocodes GPS positions, and groups rows by channel.
+    Input: the full JSON string returned by meshtastic_sniff, or a bare JSON array of packets.
+    Returns structured JSON with a 'channels' dict mapping channel name → list of table rows.
+    Each row has: source, hops, timestamp, port, message, lat, lon, location, snr_db.
+    """
+    try:
+        data = json.loads(sniff_result) if isinstance(sniff_result, str) else sniff_result
+    except Exception as e:
+        return json.dumps({"error": f"JSON parse failed: {e}"})
+
+    packets = data.get("packets", data) if isinstance(data, dict) else data
+    if not isinstance(packets, list):
+        return json.dumps({"error": "expected packets array or sniff result with 'packets' key"})
+
+    if not packets:
+        elapsed = data.get("duration_actual_sec") if isinstance(data, dict) else None
+        return json.dumps({
+            "status": "no_packets",
+            "duration_actual_sec": elapsed,
+            "message": "No Meshtastic packets decoded during the listen session.",
+            "channels": {},
+        }, indent=2)
+
+    _CHANNEL_NAMES = {
+        0: "LongFast", 1: "Ch 1", 2: "Ch 2", 3: "Ch 3",
+        4: "Ch 4",     5: "Ch 5", 6: "Ch 6", 7: "Ch 7",
+    }
+    _geocode_cache: dict[tuple, str] = {}
+    channels: dict[str, list[dict]] = {}
+
+    for pkt in packets:
+        # ── Channel ────────────────────────────────────────────────────────
+        ch_raw = pkt.get("channel") if pkt.get("channel") is not None else pkt.get("channel_hash", 0)
+        ch_key = _CHANNEL_NAMES.get(ch_raw, f"Ch {ch_raw}") if isinstance(ch_raw, int) else str(ch_raw)
+
+        # ── Source node ID ─────────────────────────────────────────────────
+        from_id = pkt.get("from")
+        source = f"!{from_id:08x}" if isinstance(from_id, int) else str(from_id or "?")
+
+        # ── Hops ────────────────────────────────────────────────────────────
+        hop_limit = pkt.get("hopLimit") or pkt.get("hop_limit")
+        hop_start = pkt.get("hopStart") or pkt.get("hop_start")
+        if hop_start is not None and hop_limit is not None:
+            hops_used = int(hop_start) - int(hop_limit)
+            hops = str(hops_used) if hops_used > 0 else "direct"
+        elif hop_limit is not None:
+            hops = "direct" if int(hop_limit) == 0 else f"≤{hop_limit}"
+        else:
+            hops = "?"
+
+        # ── Timestamp ──────────────────────────────────────────────────────
+        ts_raw = pkt.get("rxTime") or pkt.get("rx_time") or pkt.get("time")
+        if ts_raw:
+            try:
+                from datetime import datetime, timezone
+                ts = datetime.fromtimestamp(int(ts_raw), tz=timezone.utc)
+                timestamp = ts.strftime("%Y-%m-%d %H:%M:%S UTC")
+            except Exception:
+                timestamp = str(ts_raw)
+        else:
+            timestamp = "—"
+
+        # ── Decoded payload ────────────────────────────────────────────────
+        decoded = pkt.get("decoded") or {}
+        portnum = decoded.get("portnum") or pkt.get("portnum") or 0
+        port_name = MESHTASTIC_PORT_NUMS.get(portnum, str(portnum)) if isinstance(portnum, int) else str(portnum)
+
+        message = decoded.get("text") or decoded.get("payload") or ""
+        if not message:
+            if "POSITION" in port_name:
+                message = "(position update)"
+            elif "NODEINFO" in port_name:
+                message = f"({decoded.get('user', {}).get('longName', 'node info')})" if decoded.get("user") else "(node info)"
+            elif "TELEMETRY" in port_name:
+                message = "(telemetry)"
+            elif port_name:
+                message = f"({port_name})"
+            else:
+                message = "—"
+
+        # ── GPS coordinates ────────────────────────────────────────────────
+        lat = lon = location = None
+        pos = decoded.get("position") or {}
+        lat_raw = pos.get("latitudeI") or pos.get("latitude_i") or pos.get("latitude") or pos.get("lat")
+        lon_raw = pos.get("longitudeI") or pos.get("longitude_i") or pos.get("longitude") or pos.get("lon")
+        if lat_raw is not None:
+            # latitudeI is stored as integer * 1e7
+            lat = float(lat_raw) / 1e7 if isinstance(lat_raw, int) and abs(lat_raw) > 900 else float(lat_raw)
+        if lon_raw is not None:
+            lon = float(lon_raw) / 1e7 if isinstance(lon_raw, int) and abs(lon_raw) > 1800 else float(lon_raw)
+
+        if lat is not None and lon is not None:
+            cache_key = (round(lat, 3), round(lon, 3))
+            if cache_key in _geocode_cache:
+                location = _geocode_cache[cache_key]
+            else:
+                geo = json.loads(reverse_geocode(lat, lon))
+                if geo.get("status") == "ok":
+                    city = geo.get("city") or geo.get("county") or ""
+                    state = geo.get("state", "")
+                    location = f"{city}, {state}".strip(", ") if city else (geo.get("display_name") or "")[:50]
+                else:
+                    location = f"{lat:.4f}, {lon:.4f}"
+                _geocode_cache[cache_key] = location
+
+        row = {
+            "source":    source,
+            "hops":      hops,
+            "timestamp": timestamp,
+            "port":      port_name,
+            "message":   message,
+            "lat":       round(lat, 6) if lat is not None else None,
+            "lon":       round(lon, 6) if lon is not None else None,
+            "location":  location or "—",
+            "snr_db":    pkt.get("rxSnr") or pkt.get("rx_snr") or pkt.get("snr_db"),
+        }
+        channels.setdefault(ch_key, []).append(row)
+
+    return json.dumps({
+        "status": "ok",
+        "total_packets": len(packets),
+        "channel_count": len(channels),
+        "channels": channels,
+    }, indent=2)

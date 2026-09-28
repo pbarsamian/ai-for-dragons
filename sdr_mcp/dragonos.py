@@ -338,12 +338,14 @@ def meshtastic_sniff(freq_mhz: float = 906.875, duration_sec: int = 60, device: 
         except subprocess.TimeoutExpired:
             proc.kill()
 
+    elapsed_sec = int(time.time() - start)
     return json.dumps({
         "status": "complete",
         "freq_mhz": freq_mhz,
-        "duration_sec": duration_sec,
+        "duration_requested_sec": duration_sec,
+        "duration_actual_sec": elapsed_sec,
         "packets_decoded": len(packets),
-        "packets": packets[:20],
+        "packets": packets,
     }, indent=2)
 
 
