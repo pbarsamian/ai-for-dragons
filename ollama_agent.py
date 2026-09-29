@@ -165,6 +165,8 @@ Key tools:
       Columns: Source | Hops | Time | Port | Message | Location | SNR
     If meshtastic_table returns status="no_packets", report duration_actual_sec and that no packets were heard.
     Report duration_actual_sec (not duration_requested_sec) as the actual listen time.
+    Convert duration_actual_sec to human time when reporting: divide by 60 for minutes, 3600 for hours.
+    Example: duration_actual_sec=3600 → "60 minutes"; duration_actual_sec=61 → "61 seconds".
     SF11 / BW250 / LongFast = standard Meshtastic settings; sniffer already tries --keys=default.
     If no packets decoded, nodes may be on a private channel or out of range.
   explain_hex / signal_identify / identify_frequency  signal analysis
@@ -444,6 +446,33 @@ def chat_loop(model: str, all_tools: bool = False) -> None:
                         tool_args = json.loads(tool_args)
                     except json.JSONDecodeError:
                         tool_args = {}
+
+                # Auto-correct duration: catch the common model mistake of passing
+                # the number of minutes (or hours) directly as seconds.
+                # e.g. user says "60 minutes" → model passes duration_sec=60 → correct to 3600.
+                import re as _re
+                if "duration_sec" in tool_args:
+                    _ds = int(tool_args["duration_sec"])
+                    _recent = " ".join(
+                        m["content"] for m in history[-8:]
+                        if isinstance(m, dict) and m.get("role") == "user"
+                        and isinstance(m.get("content"), str)
+                    ).lower()
+                    for _pat, _mult, _unit in [
+                        (r'(\d+)\s*hour', 3600, "hr"),
+                        (r'(\d+)\s*min',  60,   "min"),
+                    ]:
+                        _m = _re.search(_pat, _recent)
+                        if _m:
+                            _raw = int(_m.group(1))
+                            _expected = _raw * _mult
+                            # Only fix when the model passed the raw count instead of seconds
+                            if _ds == _raw and _expected != _ds:
+                                tool_args["duration_sec"] = _expected
+                                print(f"\n[auto-corrected duration: {_ds}s → {_expected}s "
+                                      f"({_raw} {_unit} × {_mult})]\n")
+                            break
+                del _re
 
                 bar = "─" * max(0, 52 - len(tool_name))
                 print(f"\n── {tool_name} {bar}")
