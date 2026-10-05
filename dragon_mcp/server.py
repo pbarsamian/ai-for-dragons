@@ -33,14 +33,7 @@ from .tools.decoders import (
     multimon_stop,
 )
 
-mcp = FastMCP(
-    "dragon-mcp",
-    version="0.1.0",
-    description=(
-        "DragonOS SDR tool bridge — exposes HackRF, RTL-SDR, GQRX, and protocol "
-        "decoders as MCP tools over SSE for Claude Code / Claude.ai LAN access."
-    ),
-)
+mcp = FastMCP("dragon-mcp", version="0.1.0")
 
 # Shared stream manager — all tools that need streams share this instance
 _streams = StreamManager()
