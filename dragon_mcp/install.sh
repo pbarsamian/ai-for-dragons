@@ -9,17 +9,66 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 
-echo "=== dragon_mcp installer ==="
-echo "Repo: $REPO_DIR"
-echo "User: $(whoami)"
+# Reuse the project venv created by the main install.sh.
+# Debian 13 enforces PEP 668 — pip3 --user is blocked outside a venv.
+VENV="$HOME/.local/share/ai-for-dragons"
+VENV_PY="$VENV/bin/python"
+VENV_PIP="$VENV/bin/pip"
 
-# ── Python dependencies ────────────────────────────────────────────────────
+echo "=== dragon_mcp installer ==="
+echo "Repo:  $REPO_DIR"
+echo "Venv:  $VENV"
+echo "User:  $(whoami)"
+
+# ── Venv: create if the main installer hasn't run yet ─────────────────────
 
 echo ""
-echo "--- Installing Python dependencies ---"
-pip3 install --user -r "$SCRIPT_DIR/requirements.txt"
+echo "--- Python venv ---"
+if [ ! -x "$VENV_PY" ]; then
+    echo "Creating venv at $VENV ..."
+    python3 -m venv "$VENV"
+    echo "Venv created."
+else
+    echo "Venv already exists — reusing."
+fi
 
-# ── System packages (best-effort, skip if already present) ────────────────
+# ── Python packages ────────────────────────────────────────────────────────
+
+echo ""
+echo "--- Installing Python dependencies into venv ---"
+"$VENV_PIP" install --quiet -r "$SCRIPT_DIR/requirements.txt"
+echo "fastmcp and flask installed."
+
+# ── Link repo into venv so dragon_mcp is importable ──────────────────────
+# Uses the same .pth editable-install pattern as the main install.sh.
+
+PY_TAG=$("$VENV_PY" -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')")
+SITE="$VENV/lib/$PY_TAG/site-packages"
+PTH_FILE="$SITE/ai-for-dragons.pth"
+
+if [ ! -f "$PTH_FILE" ] || ! grep -qF "$REPO_DIR" "$PTH_FILE"; then
+    echo "$REPO_DIR" >> "$PTH_FILE"
+    echo "Repo linked into venv via $PTH_FILE"
+else
+    echo "Repo already linked in venv."
+fi
+
+# ── Smoke test ─────────────────────────────────────────────────────────────
+
+echo ""
+echo "--- Import smoke test ---"
+"$VENV_PY" - <<'PYEOF'
+from dragon_mcp.server import mcp
+from dragon_mcp.streams import StreamManager
+from dragon_mcp.tools.hackrf import _check_hackrf_free
+from dragon_mcp.tools.rtlsdr import rtlsdr_info
+from dragon_mcp.tools.gqrx import gqrx_get_status
+from dragon_mcp.tools.decoders import dump1090_start
+sm = StreamManager()
+print("OK — all imports passed, StreamManager ready")
+PYEOF
+
+# ── System packages (best-effort) ─────────────────────────────────────────
 
 echo ""
 echo "--- Checking system packages ---"
@@ -31,14 +80,13 @@ if [[ ${#PKGS_NEEDED[@]} -gt 0 ]]; then
     echo "Installing: ${PKGS_NEEDED[*]}"
     sudo apt-get install -y "${PKGS_NEEDED[@]}"
 else
-    echo "All system packages already installed."
+    echo "scrot and ffmpeg already installed."
 fi
 
 # ── systemd user service ───────────────────────────────────────────────────
 
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT_FILE="$UNIT_DIR/dragon-mcp.service"
-PYTHON_BIN="$(which python3)"
 
 mkdir -p "$UNIT_DIR"
 
@@ -50,7 +98,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=$REPO_DIR
-ExecStart=$PYTHON_BIN -m dragon_mcp.server
+ExecStart=$VENV_PY -m dragon_mcp.server
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
